@@ -38,10 +38,9 @@ def run(argstr, inputs, env):
             cmd = ["rm", "-rf", m]
             print(" ".join(cmd))
             output = subprocess.run(cmd, capture_output=True)
-            if len(output.stdout.decode()) >= 0:
-                print(f"stdout: `{output.stdout}`")
-            if len(output.stderr.decode()) >= 0:
-                print(f"stderr: `{output.stderr}`")
+            if output.returncode != 0:
+                raise RuntimeError(output.stderr.decode())
+            
         all_deleted.extend(matchedfiles)
 
     if args.dir_if_empty:
