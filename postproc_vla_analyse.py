@@ -2,9 +2,9 @@ import subprocess
 import os
 import re
 
-PROC_ENV_KEY = "ANLYSENV"
-PROC_ARG_KEY = "ANLYSARG"
-PROC_INP_KEY = "ANLYSINP"
+PROC_ENV_KEY = "CorrelationAnalysisENV"
+PROC_ARG_KEY = "CorrelationAnalysisARG"
+PROC_INP_KEY = "CorrelationAnalysisINP"
 PROC_NAME = "vla_analyse"
 
 PROC_CONTEXT = {

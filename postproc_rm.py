@@ -4,8 +4,8 @@ import os
 import argparse
 
 PROC_ENV_KEY = None
-PROC_ARG_KEY = "REMVARG"
-PROC_INP_KEY = "REMVINP"
+PROC_ARG_KEY = "RemovalARG"
+PROC_INP_KEY = "RemovalINP"
 PROC_NAME = "rm"
 
 
