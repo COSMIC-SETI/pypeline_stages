@@ -122,5 +122,5 @@ if __name__ == "__main__":
     print(run(
         "-f 128 -i 1 -td -b 0.0625 -bc 0.5 -l /mnt/slow/operations/share/telinfo_vla.toml",
         ["/mnt/buf1/delay_calib_test/GUPPI/guppi_59898_12659_38197872229_3C48_0001.0000.raw"],
-        "CONDA_PYTHON_EXE:/home/svarghes/anaconda3/envs/turboseti/bin/python3 SLACK_BOT_TOKEN:xoxb-18246494320-3792744414148-hayJaZGz6LgXWZeeZm40zQ24",
+        "CONDA_PYTHON_EXE:/home/svarghes/anaconda3/envs/turboseti/bin/python3",
     )[0])
