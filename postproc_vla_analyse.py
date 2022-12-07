@@ -91,20 +91,6 @@ def run(argstr, inputs, env):
         )
         assert result["ok"]
 
-        result = client.chat_postMessage(
-            channel = "active_vla_observations",
-            blocks = [
-                {"type": "section", "text": {"type": "mrkdwn",
-                    "text": "*Time Delays*",
-                }},
-                {"type": "divider"},
-                {"type": "section", "text": {"type": "mrkdwn",
-                    "text": "\n".join(f"{k}: {v}" for k, v in baseline_timedelays.items()),
-                }},
-            ],
-            text = f"Time Delays Measured For '{plot_id}'",
-            thread_ts = thread_ts,
-        )
         for baseline in baselines_ascending_timedelays[:min(10, len(baseline_min_timedelays))]:
             if not client.files_upload(
                 channels = channel,
