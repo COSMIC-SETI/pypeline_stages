@@ -36,7 +36,7 @@ def run(argstr, inputs, env):
         "--collation-directory",
         type=str,
         required=True,
-        help="The output directory for the collation (delays_collated_{baseband}_v2.csv).",
+        help="The output directory for the collation (delays_collated_{baseband}_v3.csv).",
     )
     args = parser.parse_args(argstr.split(" "))
 
@@ -51,13 +51,13 @@ def run(argstr, inputs, env):
         ))
 
 
-    baseline_string = 'AC' if args.baseband_pair_id == 0 else 'BD'
-    output_filepath = os.path.join(args.collation_directory, f"delays_collated_{baseline_string}_v2.csv")
+    baseband = 'AC' if args.baseband_pair_id == 0 else 'BD'
+    output_filepath = os.path.join(args.collation_directory, f"delays_collated_{baseband}_v3.csv")
     os.makedirs(args.collation_directory, exist_ok = True)
 
     if not os.path.exists(output_filepath):
         with open(output_filepath, 'w') as fio:
-            fio.write('baseline,reference,timestamp,total_pol0,total_pol1,geo,non-geo_pol0,non-geo_pol1,origin-filepath\n')
+            fio.write('baseline,reference,timestamp,total_pol0,total_pol1,geo,non-geo_pol0,non-geo_pol1,sigma_pol0,sigma_pol1,origin-filepath\n')
 
     timestamp = f"{time.time()}"
     with open(output_filepath, 'a') as fio:
@@ -72,6 +72,8 @@ def run(argstr, inputs, env):
                     f"{row['geo']:> 12.03f}",
                     f"{row['non-geo_pol0']:> 12.03f}",
                     f"{row['non-geo_pol1']:> 12.03f}",
+                    f"{row['sigma_pol0']:> 12.03f}",
+                    f"{row['sigma_pol1']:> 12.03f}",
                     inputs[0]
                 ])+'\n'
             )
