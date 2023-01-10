@@ -1,8 +1,10 @@
 import os
 import glob
 import redis
+import logging
 from hashpipe_keyvalues.standard import HashpipeKeyValues
 
+NAME = "proc_hpdaq"
 
 class DaqState:
     Unknown = -1
@@ -27,7 +29,9 @@ STATE_prev_daq = DaqState.Unknown
 STATE_current_daq = DaqState.Idle
 
 
-def setup(hostname, instance):
+def setup(hostname, instance, logger=None):
+    if logger is None:
+        logger = logging.getLogger(NAME)
     global STATE_hpkv
 
     STATE_hpkv = HashpipeKeyValues(
@@ -35,7 +39,9 @@ def setup(hostname, instance):
     )
 
 
-def run():
+def run(logger=None):
+    if logger is None:
+        logger = logging.getLogger(NAME)
     global STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq
 
     STATE_prev_daq = STATE_current_daq
@@ -43,7 +49,7 @@ def run():
     if daqstate is not None:
         STATE_current_daq = DaqState.decode_daqstate(daqstate)
         if STATE_current_daq != STATE_prev_daq:
-            print(daqstate, STATE_current_daq)
+            logger.info(daqstate, STATE_current_daq)
 
     record_finished = STATE_prev_daq == DaqState.Record and STATE_current_daq == DaqState.Idle
     if not record_finished:
@@ -62,8 +68,17 @@ def run():
     return output_filepaths
 
 
-def setupstage(stage):
+def setupstage(stage, logger = None):
+    if logger is None:
+        logger = logging.getLogger(NAME)
     global STATE_hpkv_cache
+    if hasattr(stage, "CONTEXT"):
+        for key in stage.CONTEXT.keys():
+            stage.CONTEXT[key] = (
+                getattr(STATE_hpkv_cache, key)
+                if hasattr(STATE_hpkv_cache, key)
+                else STATE_hpkv_cache.get(key)
+            )
     if hasattr(stage, "PROC_CONTEXT"):
         for key in stage.PROC_CONTEXT.keys():
             stage.PROC_CONTEXT[key] = (

@@ -1,3 +1,4 @@
+import logging
 import subprocess
 import os
 import argparse
@@ -7,9 +8,16 @@ PROC_ARG_KEY = "UVH5CalibrateARG"
 PROC_INP_KEY = "UVH5CalibrateINP"
 PROC_NAME = "uvh5_calibrate"
 
-def run(argstr, inputs, env):
+ENV_KEY = "UVH5CalibrateENV"
+ARG_KEY = "UVH5CalibrateARG"
+INP_KEY = "UVH5CalibrateINP"
+NAME = "uvh5_calibrate"
+
+def run(argstr, inputs, env, logger=None):
+    if logger is None:
+        logger = logging.getLogger(NAME)
     if len(inputs) != 1:
-        print("calibrate_uvh5 requires one input, the uvh5 filepath.")
+        logger.error("calibrate_uvh5 requires one input, the uvh5 filepath.")
         return None
     
     # parser = argparse.ArgumentParser(
@@ -33,7 +41,7 @@ def run(argstr, inputs, env):
                 pair = variablevalues.split(":")
                 env_base[pair[0]] = pair[1]
 
-    print(cmd)
+    logger.info(cmd)
     output = subprocess.run(
         cmd,
         env=env_base,
@@ -44,7 +52,7 @@ def run(argstr, inputs, env):
     if output.returncode != 0:
         raise RuntimeError(output.stderr.decode())
     output = output.stdout.decode().strip()
-    print(output)
+    logger.info(output)
     
     return []
 

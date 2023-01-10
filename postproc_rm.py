@@ -2,16 +2,23 @@ import subprocess
 import glob
 import os
 import argparse
+import logging
 
 PROC_ENV_KEY = None
 PROC_ARG_KEY = "RemovalARG"
 PROC_INP_KEY = "RemovalINP"
 PROC_NAME = "rm"
 
+ENV_KEY = None
+ARG_KEY = "RemovalARG"
+INP_KEY = "RemovalINP"
+NAME = "rm"
 
-def run(argstr, inputs, env):
+def run(argstr, inputs, env, logger=None):
+    if logger is None:
+        logger = logging.getLogger(NAME)
     if len(inputs) == 0:
-        print("rm requires at least one input. It deletes files matching `glob.glob(input) for input in inputs`.")
+        logger.error("rm requires at least one input. It deletes files matching `glob.glob(input) for input in inputs`.")
         return []
     
     parser = argparse.ArgumentParser(
@@ -36,7 +43,7 @@ def run(argstr, inputs, env):
         matchedfiles = glob.glob(f"{inputpath}{args.suffix}")
         for m in matchedfiles:
             cmd = ["rm", "-rf", m]
-            print(" ".join(cmd))
+            logger.info(" ".join(cmd))
             output = subprocess.run(cmd, capture_output=True)
             if output.returncode != 0:
                 raise RuntimeError(output.stderr.decode())
@@ -50,9 +57,9 @@ def run(argstr, inputs, env):
         contents = os.listdir(common_dir)
         if len(contents) == 0:
             os.removedir(common_dir)
-            print(f"Removed empty-directory: {common_dir}")
+            logger.info(f"Removed empty-directory: {common_dir}")
         else:
-            print(f"Common directory {common_dir} is not empty: {contents}")
+            logger.info(f"Common directory {common_dir} is not empty: {contents}")
 
     return all_deleted
 

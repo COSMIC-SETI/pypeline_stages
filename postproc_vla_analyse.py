@@ -1,30 +1,39 @@
 import subprocess
 import os
 import re
+import logging
 
 PROC_ENV_KEY = "CorrelationAnalysisENV"
 PROC_ARG_KEY = "CorrelationAnalysisARG"
 PROC_INP_KEY = "CorrelationAnalysisINP"
 PROC_NAME = "vla_analyse"
 
-PROC_CONTEXT = {
+ENV_KEY = "CorrelationAnalysisENV"
+ARG_KEY = "CorrelationAnalysisARG"
+INP_KEY = "CorrelationAnalysisINP"
+NAME = "vla_analyse"
+
+CONTEXT = {
     "OBSSTEM": ""
 }
 
-def run(argstr, inputs, env):
+def run(argstr, inputs, env, logger=None):
+    if logger is None:
+        logger = logging.getLogger(NAME)
     if len(inputs) == 0:
-        print("Analysis requires a single input path.")
+        logging.error("Analysis requires a single input path.")
+        raise RuntimeError("Analysis requires a single input path.")
         return []
 
     if " -o " not in argstr:
         argstr += " -o /mnt/slow/vla_analysis_plots"
 
-    argstr = argstr.replace("$OBSSTEM$", PROC_CONTEXT["OBSSTEM"])
+    argstr = argstr.replace("$OBSSTEM$", CONTEXT["OBSSTEM"])
 
     analysisargs = argstr.split(" ")
     output_directory = analysisargs[analysisargs.index("-o") + 1]
     cmd = ["mkdir", "-p", output_directory]
-    print(" ".join(cmd))
+    logger.info(" ".join(cmd))
     subprocess.run(cmd)
 
     cmd = f"python3 upchan_coherence.py -d {inputs[0]} {' '.join(analysisargs)}"
@@ -36,7 +45,7 @@ def run(argstr, inputs, env):
                 pair = variablevalues.split(":")
                 env_base[pair[0]] = pair[1]
 
-    print(cmd)
+    logger.info(cmd)
     analysis_output = subprocess.run(
         cmd,
         env=env_base,
@@ -47,7 +56,7 @@ def run(argstr, inputs, env):
     if analysis_output.returncode != 0:
         raise RuntimeError(analysis_output.stderr.decode())
     analysis_output = analysis_output.stdout.decode().strip()
-    print(analysis_output)
+    logger.info(analysis_output)
 
     if 'SLACK_BOT_TOKEN' in env_base:
         baseline_timedelays = {}

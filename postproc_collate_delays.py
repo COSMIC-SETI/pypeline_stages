@@ -2,14 +2,22 @@ import pandas
 import time
 import os
 import argparse
+import logging
 
 PROC_ENV_KEY = None
 PROC_ARG_KEY = "CollateDelaysARG"
 PROC_INP_KEY = "CollateDelaysINP"
 PROC_NAME = "Collate Delays"
 
+ENV_KEY = None
+ARG_KEY = "CollateDelaysARG"
+INP_KEY = "CollateDelaysINP"
+NAME = "Collate Delays"
 
-def run(argstr, inputs, env):
+
+def run(argstr, inputs, env, logger=None):
+    if logger is None:
+        logger = logging.getLogger(NAME)
     if len(inputs) != 1:
         raise RuntimeError("Provide a delay file!")
     
