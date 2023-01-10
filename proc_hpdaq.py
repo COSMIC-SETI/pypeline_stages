@@ -39,6 +39,19 @@ def setup(hostname, instance, logger=None):
     )
 
 
+def dehydrate():
+    global STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq
+    return (STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq)
+
+
+def rehydrate(dehydration_tuple):
+    global STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq
+    STATE_hpkvd = dehydration_tuple[0]
+    STATE_hpkv_cached = dehydration_tuple[1]
+    STATE_prev_daqd = dehydration_tuple[2]
+    STATE_current_daqd = dehydration_tuple[3]
+
+
 def run(logger=None):
     if logger is None:
         logger = logging.getLogger(NAME)
