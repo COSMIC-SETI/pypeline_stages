@@ -1,0 +1,16 @@
+[Unit]
+Description=Pypeline instance %I.
+After=hpdaq.service
+After=network.target
+Requires=network.target
+
+[Service]
+EnvironmentFile=/home/cosmic/src/pypeline_stages/systemd_service/pypeline_service.conf
+Restart=on-failure
+Type=simple
+ExecStart=pypeline.py %i hpdaq
+StandardOutput=append:/var/log/pypeline_%i.log
+StandardError=append:/var/log/pypeline_%i.log
+
+[Install]
+WantedBy=multi-user.target
