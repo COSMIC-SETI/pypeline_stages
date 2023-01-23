@@ -78,16 +78,20 @@ def run(argstr, inputs, env, logger=None):
         
         from slack_sdk import WebClient
         client = WebClient(token=env_base['SLACK_BOT_TOKEN'])
-        channel = "C03P8DPQHU2"
+        channel = env_base.get("SLACK_BOT_CHANNELID", "C03P8DPQHU2")
+        thread_ts = env_base.get("SLACK_BOT_THREADTS", None)
+
         result = client.files_upload(
             channels = channel,
             file = os.path.join(output_directory, f"auto_corr_{plot_id}.png"),
             filename =  f"auto_corr_{plot_id}.png",
             title = plot_id,
-            initial_comment = f"{plot_id} @ {output_directory}"
+            initial_comment = f"{plot_id} @ {output_directory}",
+            thread_ts = thread_ts
         )
         assert result["ok"]
-        thread_ts = result["file"]["shares"]["public"][channel][0]["ts"]
+        if thread_ts is None:
+            thread_ts = result["file"]["shares"]["public"][channel][0]["ts"]
 
         delays_output = os.path.join(output_directory, f"delays_{plot_id}.csv")
         result = client.files_upload(

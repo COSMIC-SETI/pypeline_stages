@@ -44,14 +44,14 @@ def run(argstr, inputs, env, logger=None):
         "--collation-directory",
         type=str,
         required=True,
-        help="The output directory for the collation (delays_collated_{baseband}_v3.csv).",
+        help="The output directory for the collation (delays_collated_{baseband}_v4.csv).",
     )
     args = parser.parse_args(argstr.split(" "))
 
     with open(inputs[0], 'rb') as fio:
         dataframe = pandas.read_csv(
             fio,
-            usecols=['Baseline', 'total_pol0', 'total_pol1', 'geo', 'non-geo_pol0', 'non-geo_pol1']
+            usecols=['Baseline', 'total_pol0', 'total_pol1', 'geo', 'non-geo_pol0', 'non-geo_pol1', 'snr_pol0', 'snr_pol1']
         )
         reference_baseline_rows = list(map(
             lambda b: args.reference_antname in b,
@@ -60,12 +60,12 @@ def run(argstr, inputs, env, logger=None):
 
 
     baseband = 'AC' if args.baseband_pair_id == 0 else 'BD'
-    output_filepath = os.path.join(args.collation_directory, f"delays_collated_{baseband}_v3.csv")
+    output_filepath = os.path.join(args.collation_directory, f"delays_collated_{baseband}_v4.csv")
     os.makedirs(args.collation_directory, exist_ok = True)
 
     if not os.path.exists(output_filepath):
         with open(output_filepath, 'w') as fio:
-            fio.write('baseline,reference,timestamp,total_pol0,total_pol1,geo,non-geo_pol0,non-geo_pol1,sigma_pol0,sigma_pol1,origin-filepath\n')
+            fio.write('baseline,reference,timestamp,total_pol0,total_pol1,geo,non-geo_pol0,non-geo_pol1,snr_pol0,snr_pol1,origin-filepath\n')
 
     timestamp = f"{time.time()}"
     with open(output_filepath, 'a') as fio:
@@ -80,8 +80,8 @@ def run(argstr, inputs, env, logger=None):
                     f"{row['geo']:> 12.03f}",
                     f"{row['non-geo_pol0']:> 12.03f}",
                     f"{row['non-geo_pol1']:> 12.03f}",
-                    f"{row['sigma_pol0']:> 12.03f}",
-                    f"{row['sigma_pol1']:> 12.03f}",
+                    f"{row['snr_pol0']:> 12.03f}",
+                    f"{row['snr_pol1']:> 12.03f}",
                     inputs[0]
                 ])+'\n'
             )

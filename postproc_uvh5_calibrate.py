@@ -61,6 +61,6 @@ if __name__ == "__main__":
         run(
             "-o ./ --genphase --pub-to-redis",
             ["/mnt/buf0/uvh5_commensal/uvh5/uvh5_59949_05980_51052330932_J0303+4716_0001.uvh5"],
-            "CONDA_PYTHON_EXE:/home/svarghes/anaconda3/envs/csomic_cal/bin/python3"
+            "CONDA_PYTHON_EXE:/home/svarghes/anaconda3/envs/cosmic_cal/bin/python3"
         )
     )

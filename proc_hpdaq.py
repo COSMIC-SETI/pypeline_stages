@@ -46,10 +46,10 @@ def dehydrate():
 
 def rehydrate(dehydration_tuple):
     global STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq
-    STATE_hpkvd = dehydration_tuple[0]
-    STATE_hpkv_cached = dehydration_tuple[1]
-    STATE_prev_daqd = dehydration_tuple[2]
-    STATE_current_daqd = dehydration_tuple[3]
+    STATE_hpkv = dehydration_tuple[0]
+    STATE_hpkv_cache = dehydration_tuple[1]
+    STATE_prev_daq = dehydration_tuple[2]
+    STATE_current_daq = dehydration_tuple[3]
 
 
 def run(logger=None):
