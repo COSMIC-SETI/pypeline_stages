@@ -56,7 +56,7 @@ def run(argstr, inputs, env, logger=None):
             common_dir = os.path.dirname(common_dir)
         contents = os.listdir(common_dir)
         if len(contents) == 0:
-            os.removedir(common_dir)
+            os.rmdir(common_dir)
             logger.info(f"Removed empty-directory: {common_dir}")
         else:
             logger.info(f"Common directory {common_dir} is not empty: {contents}")
