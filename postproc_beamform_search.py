@@ -45,8 +45,28 @@ def _add_args(parser):
     )
     parser.add_argument(
         "--output-beamformed-filterbank",
-        action='store_true',
+        action="store_true",
         help="Whether or not to write out the beamformed data.",
+    )
+    parser.add_argument(
+        "-gs",
+        "--gpu-shares",
+        type=int,
+        default=1,
+        help="How many ways the available GPUs must be shared.",
+    )
+    parser.add_argument(
+        "-gi",
+        "--gpu-share-index",
+        type=int,
+        default=0,
+        help="Which index of the shared GPUs must be used.",
+    )
+    parser.add_argument(
+        "-gt",
+        "--gpu-target-most-memory",
+        action="store_true",
+        help="Target the GPU with the most free memory.",
     )
 
 def run(argstr, inputs, env, logger=None):
@@ -92,6 +112,36 @@ def run(argstr, inputs, env, logger=None):
             if "=" in variablevalues:
                 pair = variablevalues.split("=")
                 env_base[pair[0]] = pair[1]
+
+    if args.gpu_target_most_memory:
+        nvidia_query_cmd = "nvidia-smi --query-gpu=index,name,pci.bus_id,driver_version,pstate,utilization.gpu,utilization.memory,memory.total,memory.free --format=csv"
+        output = subprocess.run(nvidia_query_cmd.split(" "), capture_output=True)
+        if output.returncode != 0:
+            logger.error(output.stderr.decode())
+        else:
+            nvidia_devs = output.stdout.decode().strip().split("\n")[1:]
+            logger.info("\n".join(nvidia_devs))
+            gpu_per_share = len(nvidia_devs) // args.gpu_shares
+            gpu_row_start = args.gpu_share_index*gpu_per_share
+            logger.info(
+                f"Only considering index {args.gpu_share_index} of {args.gpu_shares} shares ({gpu_per_share} GPUs per share): rows {gpu_row_start} to {gpu_row_start+gpu_per_share-1}"
+            )
+            nvidia_devs = nvidia_devs[gpu_row_start : gpu_row_start+gpu_per_share]
+
+            details = nvidia_devs[0].split(", ")
+            nvidia_id = details[0]
+            nvidia_memfree = int(details[-1][:-4]) # curtail " MiB"
+            for nvidia_dev in nvidia_devs[1:]:
+                details = nvidia_dev.split(", ")
+                memfree = int(details[-1][:-4]) # curtail " MiB"
+                if memfree > nvidia_memfree:
+                    nvidia_id = details[0]
+                    nvidia_memfree = memfree
+            
+            logger.info(f"Selected device #{nvidia_id} with {nvidia_memfree} MiB free.")
+            if "CUDA_VISIBLE_DEVICES" in env_base:
+                logger.warning(f"Overriding CUDA_VISIBLE_DEVICES={env_base['CUDA_VISIBLE_DEVICES']}.")
+            env_base["CUDA_VISIBLE_DEVICES"] = nvidia_id
 
     output = subprocess.run(cmd, env=env_base, capture_output=True)
     if output.returncode != 0:
