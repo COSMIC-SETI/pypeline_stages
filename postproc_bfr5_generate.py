@@ -45,8 +45,8 @@ def run(argstr, inputs, env, logger=None):
         "--beam",
         default=None,
         action="append",
-        metavar=("ra_hour,dec_deg"),
-        help="The coordinates of a beam."
+        metavar=("ra_hour,dec_deg[,name]"),
+        help="The coordinates of a beam (optionally the name too)."
     )
     parser.add_argument(
         "-p",
@@ -54,6 +54,18 @@ def run(argstr, inputs, env, logger=None):
         default=None,
         metavar=("ra_hour,dec_deg"),
         help="The coordinates of the data's phase-center."
+    )
+    parser.add_argument(
+        "--redis-hostname",
+        type=str,
+        default="redishost",
+        help="The hostname of the Redis server.",
+    )
+    parser.add_argument(
+        "--redis-port",
+        type=int,
+        default=6379,
+        help="The port of the Redis server.",
     )
     parser.add_argument(
         "raw_filepath",
@@ -131,6 +143,7 @@ def run(argstr, inputs, env, logger=None):
     for i in range(100):
         key = f"ANTNMS{i:02d}"
         if key in raw_header:
+            # antenna_names += map(lambda x: x[:-1], raw_header[key].split(","))
             antenna_names += raw_header[key].split(",")
 
     antenna_names[0:nants]
@@ -198,7 +211,7 @@ def run(argstr, inputs, env, logger=None):
 
     times_unix = (start_time_unix + 0.5 * block_time_span_s) + numpy.arange(raw_file_blocks)*block_time_span_s
 
-    beams = []
+    beam_strs = []
     if args.beam is None:
         # scrape from RAW file RA_OFF%01d,DEC_OFF%01d
         key_enum = 0
@@ -207,8 +220,8 @@ def run(argstr, inputs, env, logger=None):
             dec_key = f"DEC_OFF{key_enum}"
             if not (ra_key in raw_header and dec_key in raw_header):
                 break
-
-            beams.append(f"{raw_header[ra_key]},{raw_header[dec_key]}")
+            
+            beam_strs.append(f"{raw_header[ra_key]},{raw_header[dec_key]},BEAM_{key_enum}")
 
             key_enum += 1
             if key_enum == 10:
@@ -217,11 +230,16 @@ def run(argstr, inputs, env, logger=None):
         logger.info(f"Collected {key_enum} beam coordinates from the RAW header, in lieu of CLI provided beam coordinates.")
     elif len(args.beam) > 0:
         logger.info(args.beam)
-        beams = list(b for b in args.beam)
+        beam_strs = list(b for b in args.beam)
 
-    for i, beam_str in enumerate(beams):
+    beams = {}
+    for i, beam_str in enumerate(beam_strs):
         coords = beam_str.split(',')
-        beams[i] = bfr5_aux.SkyCoord(
+        if len(coords) == 3:
+            beam_name = coords[-1]
+        else:
+            beam_name = f"BEAM_{i}"
+        beams[beam_name] = bfr5_aux.SkyCoord(
             float(coords[0]) * numpy.pi / 12.0,
             float(coords[1]) * numpy.pi / 180.0,
             unit='rad'
@@ -230,7 +248,7 @@ def run(argstr, inputs, env, logger=None):
     nbeams = len(beams)
     if nbeams == 0:
         logger.warning(f"No beam coordinates provided, forming a beam on phase-center.")
-        beams.append(phase_center)
+        beams["PHASE_CENTER"] = phase_center
         nbeams = 1
         
     logger.info(f"Beam coordinates: {beams}")
@@ -242,7 +260,7 @@ def run(argstr, inputs, env, logger=None):
     _, delay_ns = bfr5_aux.phasors(
         antenna_positions,
         phase_center,
-        numpy.array(beams),
+        numpy.array(list(beams.values())),
         times_unix,
         frequencies_hz,
         calibrationCoefficients[schan:,:,:],
@@ -263,9 +281,9 @@ def run(argstr, inputs, env, logger=None):
         dimInfo.create_dataset("ntimes", data=ntimes)
 
         beamInfo = f.create_group("beaminfo")
-        beamInfo.create_dataset("ras", data=numpy.array([beam.ra.rad for beam in beams]), dtype='f') # radians
-        beamInfo.create_dataset("decs", data=numpy.array([beam.dec.rad for beam in beams]), dtype='f') # radians
-        source_names = [f"BEAM_{i}".encode() for i in range(nbeams)]
+        beamInfo.create_dataset("ras", data=numpy.array([beam.ra.rad for beam in beams.values()]), dtype='f') # radians
+        beamInfo.create_dataset("decs", data=numpy.array([beam.dec.rad for beam in beams.values()]), dtype='f') # radians
+        source_names = [beam.encode() for beam in beams.keys()]
         longest_source_name = max(len(name) for name in source_names)
         beamInfo.create_dataset("src_names", data=numpy.array(source_names, dtype=f"S{longest_source_name}"), dtype=h5py.special_dtype(vlen=str))
 
@@ -309,6 +327,13 @@ if __name__ == "__main__":
     logger = logging.getLogger(NAME)
     logger.addHandler(logging.StreamHandler())
     logger.setLevel(logging.INFO)
+
+    # import json
+    # import redis
+    # redis_obj = redis.Redis(host="redishost", port=6379)
+    # targets = redis_obj.get("targets:MeerKAT-example:array_1:20230111T234728Z")
+    # print(json.loads(targets))
+    # exit(0)
 
     args = [
         "--telescope-info-toml-filepath",
