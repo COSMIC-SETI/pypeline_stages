@@ -219,14 +219,20 @@ def run(argstr, inputs, env, logger=None):
     block_time_span_s = raw_header.get("PIPERBLK", ntimes) * raw_header.get("TBIN", 1/raw_header["CHAN_BW"]) * ntimes/raw_header.get("PIPERBLK", ntimes)
 
     if args.phase_center is None:
-        phase_center_ra = raw_header["RA_STR"]
-        phase_center_dec = raw_header["DEC_STR"]
+        phase_center_ra = raw_header.get("RA_PHAS", raw_header["RA_STR"])
+        phase_center_dec = raw_header.get("DEC_PHAS", raw_header["DEC_STR"])
     else:
         (phase_center_ra, phase_center_dec) = args.phase_center.split(',')
 
     phase_center = bfr5_aux.SkyCoord(
         float(phase_center_ra) * numpy.pi / 12.0 ,
         float(phase_center_dec) * numpy.pi / 180.0 ,
+        unit='rad'
+    )
+
+    primary_center = bfr5_aux.SkyCoord(
+        float(raw_header.get("RA_PRIM", raw_header["RA_STR"])) * numpy.pi / 12.0 ,
+        float(raw_header.get("DEC_PRIM", raw_header["DEC_STR"])) * numpy.pi / 180.0 ,
         unit='rad'
     )
 
@@ -350,6 +356,8 @@ def run(argstr, inputs, env, logger=None):
         obsInfo.create_dataset("freq_array", data=frequencies_hz*1e-9, dtype='f') # GHz
         obsInfo.create_dataset("phase_center_ra", data=phase_center.ra.rad, dtype='f') # radians
         obsInfo.create_dataset("phase_center_dec", data=phase_center.dec.rad, dtype='f') # radians
+        obsInfo.create_dataset("primary_center_ra", data=primary_center.ra.rad, dtype='f') # radians
+        obsInfo.create_dataset("primary_center_dec", data=primary_center.dec.rad, dtype='f') # radians
         obsInfo.create_dataset("instrument_name", data="COSMIC".encode())
 
         telInfo = f.create_group("telinfo")
