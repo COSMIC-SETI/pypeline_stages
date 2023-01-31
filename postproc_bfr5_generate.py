@@ -245,7 +245,24 @@ def run(argstr, inputs, env, logger=None):
     times_unix = (start_time_unix + 0.5 * block_time_span_s) + numpy.arange(raw_file_blocks)*block_time_span_s
 
     beam_strs = []
-    if args.beam is None:
+    if args.take_targets != 0:
+        redis_obj = redis.Redis(host=args.redis_hostname, port=args.redis_port)
+        if args.target_redis_key_timestamp is None:
+            args.target_redis_key_timestamp = start_time_unix
+
+        targets_redis_key = f"{args.target_redis_key_prefix}:{args.target_redis_key_timestamp}"
+        logger.info(f"Accessing targets at {targets_redis_key}.")
+        targets = redis_obj.get(targets_redis_key)
+        targets = json.loads(targets)
+
+        for target in args.take_targets[args.take_targets_after:args.take_targets_after+args.take_targets]:
+            beam_strs.append(
+                f"{target['ra']*24/360},{target['dec']},{target['source_id']}"
+            )
+
+        if len(beam_strs) < args.take_targets:
+            logger.warning(f"Could only take {len(beam_strs)} targets.")
+    elif args.beam is None:
         # scrape from RAW file RA_OFF%01d,DEC_OFF%01d
         key_enum = 0
         while True:
@@ -264,23 +281,6 @@ def run(argstr, inputs, env, logger=None):
     elif len(args.beam) > 0:
         logger.info(args.beam)
         beam_strs = list(b for b in args.beam)
-    elif args.take_targets != 0:
-        redis_obj = redis.Redis(host=args.redis_hostname, port=args.redis_port)
-        if args.target_redis_key_timestamp is None:
-            args.target_redis_key_timestamp = start_time_unix
-
-        targets_redis_key = f"{args.target_redis_key_prefix}:{args.target_redis_key_timestamp}"
-        logger.info(f"Accessing targets at {targets_redis_key}.")
-        targets = redis_obj.get(targets_redis_key)
-        targets = json.loads(targets)
-
-        for target in args.take_targets[args.take_targets_after:args.take_targets_after+args.take_targets]:
-            beam_strs.append(
-                f"{target['ra']*24/360},{target['dec']},{target['source_id']}"
-            )
-
-        if len(beam_strs) < args.take_targets:
-            logger.warning(f"Could only take {len(beam_strs)} targets.")
 
     beams = {}
     for i, beam_str in enumerate(beam_strs):
