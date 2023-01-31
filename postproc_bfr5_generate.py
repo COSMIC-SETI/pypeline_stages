@@ -1,9 +1,12 @@
 #!/usr/bin/env python
-import logging, os, argparse
+import logging, os, argparse, json
+from datetime import datetime
 
 import tomli as tomllib # `tomllib` as of Python 3.11 (PEP 680)
 import h5py
 import numpy
+import redis
+
 
 import bfr5_aux
 
@@ -66,6 +69,30 @@ def run(argstr, inputs, env, logger=None):
         type=int,
         default=6379,
         help="The port of the Redis server.",
+    )
+    parser.add_argument(
+        "--targets-redis-key-prefix",
+        type=str,
+        default="targets:VLA-COSMIC:vlass_array",
+        help="The prefix of the redis key holding targets in JSON."
+    )
+    parser.add_argument(
+        "--targets-redis-key-timestamp",
+        type=str,
+        default=None,
+        help="The identifying timestamp of the redis key holding targets in JSON. If not supplied, it is ascertained from the starting time of the raw file."
+    )
+    parser.add_argument(
+        "--take-targets",
+        type=int,
+        default=0,
+        help="The number of targets to form beams on from the redis key."
+    )
+    parser.add_argument(
+        "--take-targets-after",
+        type=int,
+        default=1,
+        help="The number of targets to skip. Typically 1 to skip the first target which is phase-center."
     )
     parser.add_argument(
         "raw_filepath",
@@ -143,7 +170,7 @@ def run(argstr, inputs, env, logger=None):
     for i in range(100):
         key = f"ANTNMS{i:02d}"
         if key in raw_header:
-            # antenna_names += map(lambda x: x[:-1], raw_header[key].split(","))
+            # antenna_names += map(lambda x: x[:-1], raw_header[key].split(",")) 
             antenna_names += raw_header[key].split(",")
 
     antenna_names[0:nants]
@@ -231,6 +258,23 @@ def run(argstr, inputs, env, logger=None):
     elif len(args.beam) > 0:
         logger.info(args.beam)
         beam_strs = list(b for b in args.beam)
+    elif args.take_targets != 0:
+        redis_obj = redis.Redis(host=args.redis_hostname, port=args.redis_port)
+        if args.target_redis_key_timestamp is None:
+            args.target_redis_key_timestamp = start_time_unix
+
+        targets_redis_key = f"{args.target_redis_key_prefix}:{args.target_redis_key_timestamp}"
+        logger.info(f"Accessing targets at {targets_redis_key}.")
+        targets = redis_obj.get(targets_redis_key)
+        targets = json.loads(targets)
+
+        for target in args.take_targets[args.take_targets_after:args.take_targets_after+args.take_targets]:
+            beam_strs.append(
+                f"{target['ra']*24/360},{target['dec']},{target['source_id']}"
+            )
+
+        if len(beam_strs) < args.take_targets:
+            logger.warning(f"Could only take {len(beam_strs)} targets.")
 
     beams = {}
     for i, beam_str in enumerate(beam_strs):
@@ -327,13 +371,6 @@ if __name__ == "__main__":
     logger = logging.getLogger(NAME)
     logger.addHandler(logging.StreamHandler())
     logger.setLevel(logging.INFO)
-
-    # import json
-    # import redis
-    # redis_obj = redis.Redis(host="redishost", port=6379)
-    # targets = redis_obj.get("targets:MeerKAT-example:array_1:20230111T234728Z")
-    # print(json.loads(targets))
-    # exit(0)
 
     args = [
         "--telescope-info-toml-filepath",
