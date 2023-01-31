@@ -36,6 +36,9 @@ def run(argstr, inputs, env, logger=None):
         action='store_true',
         help="Delete the deepest common directory of the inputs if it is empty after removal of inputs.",
     )
+    if argstr is None:
+        argstr = ""
+    logger.info(f"Argument String: `{argstr}`")
     args = parser.parse_args(argstr.split(" "))
 
     all_deleted = []
@@ -52,14 +55,20 @@ def run(argstr, inputs, env, logger=None):
 
     if args.dir_if_empty:
         common_dir = os.path.commonpath(all_deleted)
+        logger.debug(f"Common path for all deleted: {common_dir}")
         if os.path.isfile(common_dir):
             common_dir = os.path.dirname(common_dir)
-        contents = os.listdir(common_dir)
-        if len(contents) == 0:
-            os.rmdir(common_dir)
-            logger.info(f"Removed empty-directory: {common_dir}")
+            logger.debug(f"Common directory for all deleted: {common_dir}")
+
+        if os.path.exists(common_dir):
+            contents = os.listdir(common_dir)
+            if len(contents) == 0:
+                os.rmdir(common_dir)
+                logger.info(f"Removed empty-directory: {common_dir}")
+            else:
+                logger.info(f"Common directory {common_dir} is not empty: {contents}")
         else:
-            logger.info(f"Common directory {common_dir} is not empty: {contents}")
+            logger.warning(f"Common directory for all deleted does not exist: {common_dir}")
 
     return all_deleted
 
