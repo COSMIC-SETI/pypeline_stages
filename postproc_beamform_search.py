@@ -148,8 +148,11 @@ def run(argstr, inputs, env, logger=None):
         stderr_output = output.stderr.decode()
         logger.error(stderr_output)
         raise RuntimeError(stderr_output)
+    logger.info(output.stdout.decode().split('\n')[-1])
     
-    return glob.glob(f"{args.output_stempath}.*")
+    outputs = glob.glob(f"{args.output_stempath}.*")
+    logger.info(f"Outputs: {outputs}")
+    return outputs
 
 
 if __name__ == "__main__":
