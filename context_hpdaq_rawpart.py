@@ -7,6 +7,8 @@ from Pypeline import ProcessNote
 
 from hashpipe_keyvalues.standard import HashpipeKeyValues
 
+import common
+
 NAME = "hpdaq_rawpart"
 
 class DaqState:
@@ -82,6 +84,9 @@ def run(env=None, logger=None):
         logger = logging.getLogger(NAME)
     
     global STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts
+    # TODO probably ought to only do this when env is a different value
+    STATE_env.clear()
+    STATE_env.update(common.env_str_to_dict(env))
 
     daqstate = STATE_hpkv.get("DAQSTATE")
     if daqstate is not None:

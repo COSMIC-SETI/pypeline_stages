@@ -4,10 +4,7 @@ import os
 import argparse
 import logging
 
-PROC_ENV_KEY = "BeamformSearchENV"
-PROC_ARG_KEY = "BeamformSearchARG"
-PROC_INP_KEY = "BeamformSearchINP"
-PROC_NAME = "beamform_search"
+import common
 
 ENV_KEY = "BeamformSearchENV"
 ARG_KEY = "BeamformSearchARG"
@@ -107,11 +104,7 @@ def run(argstr, inputs, env, logger=None):
     logger.info(" ".join(cmd))
 
     env_base = os.environ.copy()
-    if env is not None:
-        for variablevalues in env.split(" "):
-            if "=" in variablevalues:
-                pair = variablevalues.split("=")
-                env_base[pair[0]] = pair[1]
+    env_base.update(common.env_str_to_dict(env))
 
     if args.gpu_target_most_memory:
         nvidia_query_cmd = "nvidia-smi --query-gpu=index,name,pci.bus_id,driver_version,pstate,utilization.gpu,utilization.memory,memory.total,memory.free --format=csv"

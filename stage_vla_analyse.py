@@ -3,10 +3,7 @@ import os
 import re
 import logging
 
-PROC_ENV_KEY = "CorrelationAnalysisENV"
-PROC_ARG_KEY = "CorrelationAnalysisARG"
-PROC_INP_KEY = "CorrelationAnalysisINP"
-PROC_NAME = "vla_analyse"
+import common
 
 ENV_KEY = "CorrelationAnalysisENV"
 ARG_KEY = "CorrelationAnalysisARG"
@@ -39,11 +36,7 @@ def run(argstr, inputs, env, logger=None):
     cmd = f"python3 upchan_coherence.py -d {inputs[0]} {' '.join(analysisargs)}"
 
     env_base = os.environ.copy()
-    if env is not None:
-        for variablevalues in env.split(" "):
-            if ":" in variablevalues:
-                pair = variablevalues.split(":")
-                env_base[pair[0]] = pair[1]
+    env_base.update(common.env_str_to_dict(env))
 
     logger.info(cmd)
     analysis_output = subprocess.run(

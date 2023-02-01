@@ -4,11 +4,6 @@ import os
 import argparse
 import logging
 
-PROC_ENV_KEY = None
-PROC_ARG_KEY = "RemovalARG"
-PROC_INP_KEY = "RemovalINP"
-PROC_NAME = "rm"
-
 ENV_KEY = None
 ARG_KEY = "RemovalARG"
 INP_KEY = "RemovalINP"

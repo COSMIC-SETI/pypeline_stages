@@ -3,10 +3,7 @@ import subprocess
 import os
 import argparse
 
-PROC_ENV_KEY = "UVH5CalibrateENV"
-PROC_ARG_KEY = "UVH5CalibrateARG"
-PROC_INP_KEY = "UVH5CalibrateINP"
-PROC_NAME = "uvh5_calibrate"
+import common
 
 ENV_KEY = "UVH5CalibrateENV"
 ARG_KEY = "UVH5CalibrateARG"
@@ -35,11 +32,7 @@ def run(argstr, inputs, env, logger=None):
     cmd = f"python3 calibrate_uvh5.py -d {inputs[0]} {argstr}"
 
     env_base = os.environ.copy()
-    if env is not None:
-        for variablevalues in env.split(" "):
-            if ":" in variablevalues:
-                pair = variablevalues.split(":")
-                env_base[pair[0]] = pair[1]
+    env_base.update(common.env_str_to_dict(env))
 
     logger.info(cmd)
     output = subprocess.run(

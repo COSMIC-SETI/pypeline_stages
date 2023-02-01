@@ -4,11 +4,6 @@ import os
 import argparse
 import logging
 
-PROC_ENV_KEY = None
-PROC_ARG_KEY = "CollateDelaysARG"
-PROC_INP_KEY = "CollateDelaysINP"
-PROC_NAME = "Collate Delays"
-
 ENV_KEY = None
 ARG_KEY = "CollateDelaysARG"
 INP_KEY = "CollateDelaysINP"

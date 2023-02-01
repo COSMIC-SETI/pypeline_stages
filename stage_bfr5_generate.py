@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import logging, os, argparse, json
+import logging, os, argparse, json, glob
 from datetime import datetime
 
 import tomli as tomllib # `tomllib` as of Python 3.11 (PEP 680)
@@ -7,13 +7,7 @@ import h5py
 import numpy
 import redis
 
-
 import bfr5_aux
-
-PROC_ENV_KEY = None
-PROC_ARG_KEY = "BFR5GenerateARG"
-PROC_INP_KEY = "BFR5GenerateINP"
-PROC_NAME = "bfr5_generate"
 
 ENV_KEY = None
 ARG_KEY = "BFR5GenerateARG"
@@ -33,8 +27,10 @@ def run(argstr, inputs, env, logger=None):
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
+        "-t",
         "--telescope-info-toml-filepath",
         type=str,
+        required=True,
         help="The path to telescope information.",
     )
     parser.add_argument(
@@ -95,70 +91,80 @@ def run(argstr, inputs, env, logger=None):
         help="The number of targets to skip. Typically 1 to skip the first target which is phase-center."
     )
     parser.add_argument(
-        "raw_filepath",
+        "raw_filepaths",
         type=str,
-        help="The path to the GUPPI RAW file.",
+        nargs="+",
+        help="The path to the GUPPI RAW file stem or of all files.",
     )
     args = parser.parse_args(argstr.split(" ") + inputs)
 
+    if len(args.raw_filepaths) == 1 and not os.path.exists(args.raw_filepaths[0]):
+        logger.info(f"Given RAW filepath does not exist, assuming it is the stem.")
+        args.raw_filepaths = glob.glob(f"{args.raw_filepaths[0]}*.raw")
+
+    raw_blocks = 0
     raw_header = {}
-    with open(args.raw_filepath, mode="rb") as f:
-        header_entry = f.read(80).decode()
-        while header_entry:
-            if header_entry == "END" + " "*77:
-                break
-
-            key = header_entry[0:8].strip()
-            value = header_entry[9:].strip()
-            try:
-                value = float(value)
-                if value == int(value):
-                    value = int(value)
-            except:
-                # must be a str value, drop enclosing single-quotes
-                assert value[0] == value[-1] == "'"
-                value = value[1:-1].strip()
-
-            raw_header[key] = value
+    for raw_file_enum, raw_filepath in enumerate(args.raw_filepaths):
+        with open(raw_filepath, mode="rb") as f:
             header_entry = f.read(80).decode()
-        logger.info(f"First header: {raw_header} (@ position {f.tell()})")
-
-        # count number of blocks in file, assume BLOCSIZE is consistent
-        data_seek_size = raw_header["BLOCSIZE"]
-        if raw_header.get("DIRECTIO", 0) == 1:
-            data_seek_size = int((data_seek_size + 511) / 512) * 512
-            logger.debug(f"BLOCSIZE rounded {raw_header['BLOCSIZE']} up to {data_seek_size}")
-
-        raw_file_blocks = 0
-        while True:
-            if raw_header.get("DIRECTIO", 0) == 1:
-                origin = f.tell()
-                f.seek(int((f.tell() + 511) / 512) * 512)
-                logger.debug(f"Seeked past padding: {origin} -> {f.tell()}")
-
-            f.seek(data_seek_size + f.tell())
-            block_header_start = f.tell()
-            raw_file_blocks += 1
-            try:
-                header_entry = f.read(80).decode()
-                if len(header_entry) < 80:
+            while header_entry:
+                if header_entry == "END" + " "*77:
                     break
-                while header_entry != "END" + " "*77:
-                    header_entry = f.read(80).decode()
-            except UnicodeDecodeError as err:
-                pos = f.tell()
-                f.seek(pos - 321)
-                preceeding_bytes = f.read(240)
-                next_bytes = f.read(240)
                 
-                logger.error(f"UnicodeDecodeError at position: {pos}")
-                logger.error(f"Preceeding bytes: {preceeding_bytes}")
-                logger.error(f"Proceeding bytes: {next_bytes}")
-                logger.error(f"Block #{raw_file_blocks} starting at {block_header_start}")
+                if raw_file_enum != 0:
+                    continue
 
-                exit(1)
+                key = header_entry[0:8].strip()
+                value = header_entry[9:].strip()
+                try:
+                    value = float(value)
+                    if value == int(value):
+                        value = int(value)
+                except:
+                    # must be a str value, drop enclosing single-quotes
+                    assert value[0] == value[-1] == "'"
+                    value = value[1:-1].strip()
 
-    logger.info(f"Counted {raw_file_blocks} block(s) in the file.")
+                raw_header[key] = value
+                header_entry = f.read(80).decode()
+
+            logger.debug(f"First header: {raw_header} (ends @ position {f.tell()})")
+
+            # count number of blocks in file, assume BLOCSIZE is consistent
+            data_seek_size = raw_header["BLOCSIZE"]
+            if raw_header.get("DIRECTIO", 0) == 1:
+                data_seek_size = int((data_seek_size + 511) / 512) * 512
+                logger.debug(f"BLOCSIZE rounded {raw_header['BLOCSIZE']} up to {data_seek_size}")
+
+            while True:
+                if raw_header.get("DIRECTIO", 0) == 1:
+                    origin = f.tell()
+                    f.seek(int((f.tell() + 511) / 512) * 512)
+                    logger.debug(f"Seeked past padding: {origin} -> {f.tell()}")
+
+                f.seek(data_seek_size + f.tell())
+                block_header_start = f.tell()
+                raw_blocks += 1
+                try:
+                    header_entry = f.read(80).decode()
+                    if len(header_entry) < 80:
+                        break
+                    while header_entry != "END" + " "*77:
+                        header_entry = f.read(80).decode()
+                except UnicodeDecodeError as err:
+                    pos = f.tell()
+                    f.seek(pos - 321)
+                    preceeding_bytes = f.read(240)
+                    next_bytes = f.read(240)
+                    
+                    logger.error(f"UnicodeDecodeError in {raw_filepath} at position: {pos}")
+                    logger.error(f"Preceeding bytes: {preceeding_bytes}")
+                    logger.error(f"Proceeding bytes: {next_bytes}")
+                    logger.error(f"Block #{raw_blocks} starting at {block_header_start}")
+
+                    exit(1)
+
+    logger.info(f"Counted {raw_blocks} block(s).")
 
     # General RAW metadata
     nants = raw_header.get("NANTS", 1)
@@ -206,7 +212,7 @@ def run(argstr, inputs, env, logger=None):
 
     antenna_position_frame = 'ecef'
 
-    input_dir, input_filename = os.path.split(args.raw_filepath)
+    input_dir, input_filename = os.path.split(args.raw_filepaths[0])
     if args.output_filepath is None:
         output_filepath = os.path.join(input_dir, f"{os.path.splitext(input_filename)[0]}.bfr5")
     else:
@@ -242,13 +248,15 @@ def run(argstr, inputs, env, logger=None):
     frequencies_hz = frequency_channel_0_hz + numpy.arange(nchan)*raw_header["CHAN_BW"]
     assert len(frequencies_hz) == nchan
 
-    times_unix = (start_time_unix + 0.5 * block_time_span_s) + numpy.arange(raw_file_blocks)*block_time_span_s
+    times_unix = (start_time_unix + 0.5 * block_time_span_s) + numpy.arange(raw_blocks)*block_time_span_s
 
     beam_strs = []
     if args.take_targets != 0:
         redis_obj = redis.Redis(host=args.redis_hostname, port=args.redis_port)
         if args.targets_redis_key_timestamp is None:
-            args.targets_redis_key_timestamp = start_time_unix
+            file_start_packet_index = raw_header["SYNCTIME"] + raw_header["PKTIDX"]
+            logger.info(f"Targets key timestamp is taken to be the starting packet-index of the file: {file_start_packet_index}")
+            args.targets_redis_key_timestamp = file_start_packet_index
 
         targets_redis_key = f"{args.targets_redis_key_prefix}:{args.targets_redis_key_timestamp}"
         logger.info(f"Accessing targets at {targets_redis_key}.")
