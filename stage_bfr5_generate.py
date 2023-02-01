@@ -247,15 +247,15 @@ def run(argstr, inputs, env, logger=None):
     beam_strs = []
     if args.take_targets != 0:
         redis_obj = redis.Redis(host=args.redis_hostname, port=args.redis_port)
-        if args.target_redis_key_timestamp is None:
-            args.target_redis_key_timestamp = start_time_unix
+        if args.targets_redis_key_timestamp is None:
+            args.targets_redis_key_timestamp = start_time_unix
 
-        targets_redis_key = f"{args.target_redis_key_prefix}:{args.target_redis_key_timestamp}"
+        targets_redis_key = f"{args.targets_redis_key_prefix}:{args.targets_redis_key_timestamp}"
         logger.info(f"Accessing targets at {targets_redis_key}.")
         targets = redis_obj.get(targets_redis_key)
         targets = json.loads(targets)
 
-        for target in args.take_targets[args.take_targets_after:args.take_targets_after+args.take_targets]:
+        for target in targets[args.take_targets_after : args.take_targets_after+args.take_targets]:
             beam_strs.append(
                 f"{target['ra']*24/360},{target['dec']},{target['source_id']}"
             )
@@ -301,7 +301,8 @@ def run(argstr, inputs, env, logger=None):
         beams["PHASE_CENTER"] = phase_center
         nbeams = 1
         
-    logger.info(f"Beam coordinates: {beams}")
+    beam_coordinates_string = "\n\t".join(f"{k}: {v}".replace("\n", "") for k, v in beams.items())
+    logger.info(f"Beam coordinates:\n\t{beam_coordinates_string}")
 
     calibrationCoefficients = numpy.ones(
         (schan + nchan, npol, nants)

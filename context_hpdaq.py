@@ -2,9 +2,12 @@ import os
 import glob
 import redis
 import logging
+
+from Pypeline import ProcessNote
+
 from hashpipe_keyvalues.standard import HashpipeKeyValues
 
-NAME = "proc_hpdaq_rawpart"
+NAME = "hpdaq"
 
 class DaqState:
     Unknown = -1
@@ -27,8 +30,6 @@ STATE_hpkv = None
 STATE_hpkv_cache = None
 STATE_prev_daq = DaqState.Unknown
 STATE_current_daq = DaqState.Idle
-STATE_all_parts = []
-STATE_processed_parts = []
 
 
 def setup(hostname, instance, logger=None):
@@ -42,15 +43,15 @@ def setup(hostname, instance, logger=None):
 
 
 def dehydrate():
-    global STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts
+    global STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq
     return (
         (STATE_hpkv.hostname, STATE_hpkv.instance_id, "redishost"),
-        STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts
+        STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq
     )
 
 
 def rehydrate(dehydration_tuple):
-    global STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts
+    global STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq
     STATE_hpkv = HashpipeKeyValues(
         dehydration_tuple[0][0],
         dehydration_tuple[0][1],
@@ -59,14 +60,12 @@ def rehydrate(dehydration_tuple):
     STATE_hpkv_cache = dehydration_tuple[1]
     STATE_prev_daq = dehydration_tuple[2]
     STATE_current_daq = dehydration_tuple[3]
-    STATE_all_parts = dehydration_tuple[4]
-    STATE_processed_parts = dehydration_tuple[5]
 
 
-def run(logger=None):
+def run(env=None, logger=None):
     if logger is None:
         logger = logging.getLogger(NAME)
-    global STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts
+    global STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq
 
     STATE_prev_daq = STATE_current_daq
     daqstate = STATE_hpkv.get("DAQSTATE")
@@ -75,42 +74,21 @@ def run(logger=None):
         if STATE_current_daq != STATE_prev_daq:
             logger.info(f"daqstate: {daqstate}, STATE_current_daq: {STATE_current_daq}")
 
-    record_started = STATE_prev_daq != DaqState.Record and STATE_current_daq == DaqState.Record
-    record_ongoing = STATE_current_daq == DaqState.Record
     record_finished = STATE_prev_daq == DaqState.Record and STATE_current_daq == DaqState.Idle
-
-    parts_to_process = None
-    latest_list_of_parts = glob.glob(f"{os.path.join(*map(str, STATE_hpkv.observation_stempath))}*.raw")
-    unseen_latest_parts = [part for part in latest_list_of_parts if part not in STATE_all_parts]
-    if record_started:
-        # first part is opened, store it and move on
-        STATE_all_parts.clear()
-        STATE_processed_parts.clear()
-        unseen_latest_parts = latest_list_of_parts
-        logger.info(f"Recording has started. Initial parts: {latest_list_of_parts}")
-    
-    elif record_ongoing:
-        if len(unseen_latest_parts) > 0:
-            # new parts mean the previous are complete
-            parts_to_process = [part for part in STATE_all_parts if part not in STATE_processed_parts]
-
-    elif record_finished:
-        logger.info(f"Recording has finished.")
-        # remaining unprocessed parts are taken to be complete
-        parts_to_process = [part for part in STATE_all_parts if part not in STATE_processed_parts]
-        if STATE_hpkv.get("PKTSTART") == STATE_hpkv.get("PKTSTOP"):
-            logger.info(f"Recording was cancelled. Not processing remaining parts: {parts_to_process}")
-            parts_to_process = None
-    else:
-        # not recording
+    if not record_finished:
+        return None
+    elif STATE_hpkv.get("PKTSTART") == 0 and STATE_hpkv.get("PKTSTOP") == 0:
+        # seems that the observation aborted, ignore
         return None
 
-    STATE_hpkv_cache = STATE_hpkv.get_cache()
-    STATE_all_parts += unseen_latest_parts
-    if parts_to_process is not None:
-        STATE_processed_parts += parts_to_process
+    # prev_daq == DaqState.Record and current_daq = DaqState.Idle
+    # i.e. recording just completed
+    obs_stempath = f"{os.path.join(*STATE_hpkv.observation_stempath)}*"
+    output_filepaths = glob.glob(obs_stempath)
 
-    return parts_to_process
+    STATE_hpkv_cache = STATE_hpkv.get_cache()
+
+    return output_filepaths
 
 
 def setupstage(stage, logger = None):
@@ -135,6 +113,10 @@ def setupstage(stage, logger = None):
             )
         except:
             logger.error(f"Could not populate key: {key}.")
+
+
+def note(processnote: ProcessNote, **kwargs):
+    pass
 
 
 if __name__ == "__main__":
