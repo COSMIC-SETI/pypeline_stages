@@ -101,6 +101,7 @@ def run(argstr, inputs, env, logger=None):
     if len(args.raw_filepaths) == 1 and not os.path.exists(args.raw_filepaths[0]):
         logger.info(f"Given RAW filepath does not exist, assuming it is the stem.")
         args.raw_filepaths = glob.glob(f"{args.raw_filepaths[0]}*.raw")
+        logger.info(f"Found {args.raw_filepaths}.")
 
     raw_blocks = 0
     raw_header = {}
@@ -112,6 +113,7 @@ def run(argstr, inputs, env, logger=None):
                     break
                 
                 if raw_file_enum != 0:
+                    header_entry = f.read(80).decode()
                     continue
 
                 key = header_entry[0:8].strip()
