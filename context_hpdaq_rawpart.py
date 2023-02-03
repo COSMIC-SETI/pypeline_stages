@@ -73,7 +73,7 @@ def rehydrate(dehydration_tuple):
     STATE_hpkv = HashpipeKeyValues(
         dehydration_tuple[0][0],
         dehydration_tuple[0][1],
-        redis.Redis(dehydration_tuple[1], decode_responses=True)
+        redis.Redis(dehydration_tuple[0][2], decode_responses=True)
     )
     STATE_env = dehydration_tuple[1]
     STATE_hpkv_cache = dehydration_tuple[2]
