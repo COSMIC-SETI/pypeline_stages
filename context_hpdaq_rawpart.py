@@ -1,7 +1,10 @@
 import os
 import glob
-import redis
+import json
 import logging
+import traceback
+
+import redis
 
 from Pypeline import ProcessNote
 
@@ -58,25 +61,26 @@ def setup(hostname, instance, logger=None):
 
 
 def dehydrate():
-    global STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts
+    global STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts
     return (
         (STATE_hpkv.hostname, STATE_hpkv.instance_id, "redishost"),
-        STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts
+        STATE_env, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts
     )
 
 
 def rehydrate(dehydration_tuple):
-    global STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts
+    global STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts
     STATE_hpkv = HashpipeKeyValues(
         dehydration_tuple[0][0],
         dehydration_tuple[0][1],
         redis.Redis(dehydration_tuple[1], decode_responses=True)
     )
-    STATE_hpkv_cache = dehydration_tuple[1]
-    STATE_prev_daq = dehydration_tuple[2]
-    STATE_current_daq = dehydration_tuple[3]
-    STATE_all_parts = dehydration_tuple[4]
-    STATE_processed_parts = dehydration_tuple[5]
+    STATE_env = dehydration_tuple[1]
+    STATE_hpkv_cache = dehydration_tuple[2]
+    STATE_prev_daq = dehydration_tuple[3]
+    STATE_current_daq = dehydration_tuple[4]
+    STATE_all_parts = dehydration_tuple[5]
+    STATE_processed_parts = dehydration_tuple[6]
 
 
 def run(env=None, logger=None):
@@ -178,7 +182,46 @@ def setupstage(stage, logger = None):
 
 
 def note(processnote: ProcessNote, **kwargs):
-    pass
+    global STATE_env, STATE_hpkv, STATE_hpkv_cache
+
+    if "POSTPROC_PROGRESS_REDIS_CHANNEL" not in STATE_env:
+        return
+
+    redis_channel = STATE_env["POSTPROC_PROGRESS_REDIS_CHANNEL"]
+    redis_obj = STATE_hpkv.redis_obj
+
+    progress_statement = {
+        "hostname": STATE_hpkv.hostname,
+        "instance_id": STATE_hpkv.instance_id,
+        "observation_id": STATE_hpkv_cache.get("OBSID"),
+        "process_id": kwargs["process_id"],
+    }
+    try:
+        progress_statement["process_note"] = ProcessNote.string(processnote)
+    except:
+        progress_statement["process_note"] = "Unknown"
+
+    if processnote == ProcessNote.Start:
+        progress_statement["context_output"] = kwargs["context_output"]
+    elif processnote == ProcessNote.StageStart:
+        progress_statement["stage_name"] = kwargs["stage"].NAME
+        progress_statement["stage_inputs"] = kwargs["inpvalue"]
+        progress_statement["stage_arguments"] = kwargs["argvalue"]
+        progress_statement["stage_environment"] = kwargs["envvalue"]
+    elif processnote == ProcessNote.StageFinish:
+        progress_statement["stage_name"] = kwargs["stage"].NAME
+        progress_statement["stage_output"] = kwargs["output"]
+    elif processnote == ProcessNote.StageError:
+        progress_statement["stage_name"] = kwargs["stage"].NAME
+        progress_statement["error"] = repr(kwargs["error"])
+        progress_statement["traceback"] = traceback.format_exc()
+    elif processnote == ProcessNote.Finish:
+        pass
+
+    redis_obj.publish(
+        redis_channel,
+        json.dumps(progress_statement)
+    )
 
 
 if __name__ == "__main__":
