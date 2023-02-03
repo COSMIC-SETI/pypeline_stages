@@ -34,6 +34,20 @@ def _add_args(parser):
         help="The number of coarse channels to process at a time",
     )
     parser.add_argument(
+        "-s",
+        "--snr-threshold",
+        type=float,
+        default=0.0,
+        help="The SETI search SNR threshold",
+    )
+    parser.add_argument(
+        "-d",
+        "--drift-rate-maximum",
+        type=float,
+        default=50.0,
+        help="The SETI search drift rate maximum",
+    )
+    parser.add_argument(
         "-N",
         "--number-of-workers",
         type=int,
@@ -92,6 +106,8 @@ def run(argstr, inputs, env, logger=None):
         "--output-type", "CF32" if not args.output_beamformed_filterbank else "F32",
         "-t", "ATA",
         "-m", "BS",
+        "-s", str(args.snr_threshold),
+        "-d", str(args.drift_rate_maximum),
         "-c", str(args.channelization_rate),
         "-T", str(args.search_time),
         "-C", str(args.coarse_channel_ingest_rate),
