@@ -202,7 +202,7 @@ def note(processnote: ProcessNote, **kwargs):
         progress_statement["process_note"] = "Unknown"
 
     if processnote == ProcessNote.Start:
-        progress_statement["context_output"] = kwargs["context_output"]
+        progress_statement["context_outputs"] = kwargs["context_outputs"]
     elif processnote == ProcessNote.StageStart:
         progress_statement["stage_name"] = kwargs["stage"].NAME
         progress_statement["stage_inputs"] = kwargs["inpvalue"]
