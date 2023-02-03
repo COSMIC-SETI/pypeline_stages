@@ -33,8 +33,8 @@ def run(argstr, inputs, env, logger=None):
     )
     if argstr is None:
         argstr = ""
-    logger.info(f"Argument String: `{argstr}`")
-    args = parser.parse_args(argstr.split(" "))
+    arglist = [arg for arg in argstr.split(" ") if len(arg) != 0]
+    args = parser.parse_args(arglist)
 
     all_deleted = []
     for inputpath in inputs:
