@@ -194,7 +194,7 @@ def note(processnote: ProcessNote, **kwargs):
         "hostname": STATE_hpkv.hostname,
         "instance_id": STATE_hpkv.instance_id,
         "observation_id": STATE_hpkv_cache.get("OBSID"),
-        "process_id": kwargs["process_id"],
+        "process_id": str(kwargs["process_id"]),
     }
     try:
         progress_statement["process_note"] = ProcessNote.string(processnote)
@@ -218,6 +218,7 @@ def note(processnote: ProcessNote, **kwargs):
     elif processnote == ProcessNote.Finish:
         pass
 
+    kwargs["logger"].debug(progress_statement)
     redis_obj.publish(
         redis_channel,
         json.dumps(progress_statement)
