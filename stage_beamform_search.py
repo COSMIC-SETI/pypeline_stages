@@ -4,12 +4,19 @@ import os
 import argparse
 import logging
 
+from Pypeline import replace_keywords
+
 import common
 
 ENV_KEY = "BeamformSearchENV"
 ARG_KEY = "BeamformSearchARG"
 INP_KEY = "BeamformSearchINP"
 NAME = "beamform_search"
+
+CONTEXT = {
+    "project_id": None,
+    "OBSID": None,
+}
 
 def _add_args(parser):
     parser.add_argument(
@@ -41,7 +48,20 @@ def _add_args(parser):
         help="The SETI search SNR threshold",
     )
     parser.add_argument(
+        "-z",
+        "--drift-rate-zero-excluded",
+        action="store_true",
+        help="The SETI search exclude hits with drift rates of zero",
+    )
+    parser.add_argument(
         "-d",
+        "--drift-rate-minimum",
+        type=float,
+        default=0.0,
+        help="The SETI search drift rate minimum",
+    )
+    parser.add_argument(
+        "-D",
         "--drift-rate-maximum",
         type=float,
         default=50.0,
@@ -81,6 +101,8 @@ def _add_args(parser):
     )
 
 def run(argstr, inputs, env, logger=None):
+    global CONTEXT
+
     if logger is None:
         logger = logging.getLogger(NAME)
     if len(inputs) != 2:
@@ -98,6 +120,7 @@ def run(argstr, inputs, env, logger=None):
         default=os.path.splitext(inputs[0])[0],
         help="The output directory of the products.",
     )
+    argstr = replace_keywords(CONTEXT, argstr)
     args = parser.parse_args(argstr.split(" "))
 
     cmd = [
@@ -106,8 +129,13 @@ def run(argstr, inputs, env, logger=None):
         "--output-type", "CF32" if not args.output_beamformed_filterbank else "F32",
         "-t", "ATA",
         "-m", "BS",
+    ]
+    if args.drift_rate_zero_excluded:
+        cmd.append('-Z')
+    
+    cmd.extend([
         "-s", str(args.snr_threshold),
-        "-d", str(args.drift_rate_maximum),
+        "-D", str(args.drift_rate_maximum),
         "-c", str(args.channelization_rate),
         "-T", str(args.search_time),
         "-C", str(args.coarse_channel_ingest_rate),
@@ -115,7 +143,7 @@ def run(argstr, inputs, env, logger=None):
         inputs[0],
         inputs[1],
         args.output_stempath
-    ]
+    ])
 
     logger.info(" ".join(cmd))
 
@@ -155,11 +183,16 @@ def run(argstr, inputs, env, logger=None):
     output = subprocess.run(cmd, env=env_base, capture_output=True)
     if output.returncode != 0:
         stderr_output = output.stderr.decode()
+        if len(stderr_output) == 0:
+            stderr_output = f"Nothing in stderr, possibly a more serious issue (segfault)."
+
         logger.error(stderr_output)
         raise RuntimeError(stderr_output)
     logger.info(output.stdout.decode().split('\n')[-1])
     
-    outputs = glob.glob(f"{args.output_stempath}.*")
+    outputs = glob.glob(f"{args.output_stempath}.seticore.*")
+    outputs.extend(glob.glob(f"{args.output_stempath}-beam*.fil"))
+
     logger.info(f"Outputs: {outputs}")
     return outputs
 
