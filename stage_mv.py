@@ -12,7 +12,8 @@ INP_KEY = "MoveINP"
 NAME = "mv"
 
 CONTEXT = {
-    "project_id": None,
+    "PROJID": None,
+    "OBSID": None,
 }
 
 def run(argstr, inputs, env, logger=None):
@@ -38,10 +39,9 @@ def run(argstr, inputs, env, logger=None):
     )
     if argstr is None:
         argstr = ""
+    argstr = replace_keywords(CONTEXT, argstr)
     arglist = [arg for arg in argstr.split(" ") if len(arg) != 0]
     args = parser.parse_args(arglist)
-
-    args.destination_dirpath = replace_keywords(CONTEXT, args.destination_dirpath)
 
     if not os.path.exists(args.destination_dirpath):
         logger.info(f"Creating destination directory: {args.destination_dirpath}.")
