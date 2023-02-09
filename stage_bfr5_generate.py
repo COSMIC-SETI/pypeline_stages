@@ -263,6 +263,9 @@ def run(argstr, inputs, env, logger=None):
         targets_redis_key = f"{args.targets_redis_key_prefix}:{args.targets_redis_key_timestamp}"
         logger.info(f"Accessing targets at {targets_redis_key}.")
         targets = redis_obj.get(targets_redis_key)
+        if targets is None:
+            raise ValueError(f"No targets to retrieve at: {targets_redis_key}.")
+
         targets = json.loads(targets)
 
         for target in targets[args.take_targets_after : args.take_targets_after+args.take_targets]:
