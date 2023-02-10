@@ -29,7 +29,7 @@ def run(argstr, inputs, env, logger=None):
     # )
     # args = parser.parse_args(argstr.split(" "))
 
-    cmd = f"/home/cosmic/anaconda3/envs/cosmic_vla/bin/python3 calibrate_uvh5.py -d {inputs[0]} {argstr}"
+    cmd = f"/home/cosmic/anaconda3/envs/cosmic_vla/bin/python3 /home/cosmic/dev/COSMIC-VLA-CalibrationEngine/calibrate_uvh5.py -d {inputs[0]} {argstr}"
 
     env_base = os.environ.copy()
     env_base.update(common.env_str_to_dict(env))
@@ -40,7 +40,6 @@ def run(argstr, inputs, env, logger=None):
         env=env_base,
         capture_output=True,
         shell=True,
-        cwd="/home/cosmic/dev/COSMIC-VLA-CalibrationEngine/"
     )
     if output.returncode != 0:
         raise RuntimeError(output.stderr.decode())
