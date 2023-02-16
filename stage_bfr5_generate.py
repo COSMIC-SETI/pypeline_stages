@@ -48,6 +48,13 @@ def run(argstr, inputs, env, logger=None):
         help="The coordinates of a beam (optionally the name too)."
     )
     parser.add_argument(
+        "-m",
+        "--mitigate-antenna",
+        default=[],
+        nargs="+",
+        help="The names of antenna to migigate (associated calibration coefficients are set to zero)."
+    )
+    parser.add_argument(
         "-p",
         "--phase-center",
         default=None,
@@ -320,6 +327,11 @@ def run(argstr, inputs, env, logger=None):
     calibrationCoefficients = numpy.ones(
         (schan + nchan, npol, nants)
     )*(1+0j)
+    for ant_name in args.mitigate_antenna:
+        if ant_name not in telescope_antenna_names:
+            raise RuntimeError(f"Cannot mitigate antenna {ant_name} as it is not recorded in the file. Antenna names: {telescope_antenna_names}")
+        index = telescope_antenna_names.index(ant_name)
+        calibrationCoefficients[:, :, index] *= 0
 
     _, delay_ns = bfr5_aux.phasors(
         antenna_positions,
