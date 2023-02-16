@@ -245,7 +245,7 @@ def run(argstr, inputs, env, logger=None):
     )
 
     # find the observation channel0 frequency, then offset to the recorded subband channel0
-    frequency_channel_0_hz = raw_header["OBSFREQ"] - (raw_header.get("FENCHAN", nchan) * raw_header["CHAN_BW"])
+    frequency_channel_0_hz = raw_header["OBSFREQ"] - ((raw_header.get("FENCHAN", nchan)/2.0 + 0.5)  * raw_header["CHAN_BW"])
     frequency_channel_0_hz += schan * raw_header["CHAN_BW"]
     frequencies_hz = frequency_channel_0_hz + numpy.arange(nchan)*raw_header["CHAN_BW"]
     assert len(frequencies_hz) == nchan
