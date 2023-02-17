@@ -251,11 +251,13 @@ def run(argstr, inputs, env, logger=None):
         unit='rad'
     )
 
-    # find the observation channel0 frequency, then offset to the recorded subband channel0
-    frequency_channel_0_hz = raw_header["OBSFREQ"] - ((raw_header.get("FENCHAN", nchan)/2.0 + 0.5)  * raw_header["CHAN_BW"])
-    frequency_channel_0_hz += schan * raw_header["CHAN_BW"]
-    frequencies_hz = frequency_channel_0_hz + numpy.arange(nchan)*raw_header["CHAN_BW"]
+    # find the observation channel0 frequency, which is the start of the frequency range
+    frequency_channel_0_hz = raw_header["OBSFREQ"] - (nchan/2 + 0.5)*raw_header["CHAN_BW"]
+    frequencies_hz = (frequency_channel_0_hz + numpy.arange(nchan)*raw_header["CHAN_BW"])*1e6
     assert len(frequencies_hz) == nchan
+    mid_chan = nchan//2
+    center_freq = (frequencies_hz[mid_chan] + frequencies_hz[mid_chan+1]) / 2
+    assert center_freq == raw_header["OBSFREQ"]*1e6, f"{frequencies_hz[mid_chan]} + {frequencies_hz[mid_chan+1]} / 2 = {center_freq} != {raw_header['OBSFREQ']*1e6}"
 
     times_unix = (start_time_unix + 0.5 * block_time_span_s) + numpy.arange(raw_blocks)*block_time_span_s
 
@@ -324,14 +326,19 @@ def run(argstr, inputs, env, logger=None):
     beam_coordinates_string = "\n\t".join(f"{k}: {v}".replace("\n", "") for k, v in beams.items())
     logger.info(f"Beam coordinates:\n\t{beam_coordinates_string}")
 
-    calibrationCoefficients = numpy.ones(
-        (schan + nchan, npol, nants)
+    calibrationGain = numpy.ones(
+        (npol, nants)
     )*(1+0j)
     for ant_name in args.mitigate_antenna:
         if ant_name not in telescope_antenna_names:
             raise RuntimeError(f"Cannot mitigate antenna {ant_name} as it is not recorded in the file. Antenna names: {telescope_antenna_names}")
         index = telescope_antenna_names.index(ant_name)
-        calibrationCoefficients[:, :, index] *= 0
+        calibrationGain[:, index] = 0
+    
+    calibrationCoefficients = numpy.ones(
+        (schan + nchan, npol, nants)
+    )*(1+0j)
+    calibrationCoefficients *= numpy.repeat(calibrationGain, schan + nchan).reshape(calibrationCoefficients.shape)
 
     _, delay_ns = bfr5_aux.phasors(
         antenna_positions,
@@ -357,45 +364,45 @@ def run(argstr, inputs, env, logger=None):
         dimInfo.create_dataset("ntimes", data=ntimes)
 
         beamInfo = f.create_group("beaminfo")
-        beamInfo.create_dataset("ras", data=numpy.array([beam.ra.rad for beam in beams.values()]), dtype='f') # radians
-        beamInfo.create_dataset("decs", data=numpy.array([beam.dec.rad for beam in beams.values()]), dtype='f') # radians
+        beamInfo.create_dataset("ras", data=numpy.array([beam.ra.rad for beam in beams.values()]), dtype='d') # radians
+        beamInfo.create_dataset("decs", data=numpy.array([beam.dec.rad for beam in beams.values()]), dtype='d') # radians
         source_names = [beam.encode() for beam in beams.keys()]
         longest_source_name = max(len(name) for name in source_names)
         beamInfo.create_dataset("src_names", data=numpy.array(source_names, dtype=f"S{longest_source_name}"), dtype=h5py.special_dtype(vlen=str))
 
         calInfo = f.create_group("calinfo")
         calInfo.create_dataset("refant", data=raw_header.get("REFANT", raw_header["ANTNMS00"].split(',')[0]).encode())
-        calInfo.create_dataset("cal_K", data=numpy.ones((npol, nants)), dtype='f')
-        calInfo.create_dataset("cal_B", data=numpy.ones((schan+nchan, npol, nants))*(1+0j), dtype='F')
-        calInfo.create_dataset("cal_G", data=numpy.ones((npol, nants))*(1+0j), dtype='F')
-        calInfo.create_dataset("cal_all", data=calibrationCoefficients, dtype='F')
+        calInfo.create_dataset("cal_K", data=numpy.ones((npol, nants)), dtype='d')
+        calInfo.create_dataset("cal_B", data=numpy.ones((schan+nchan, npol, nants))*(1+0j), dtype='D')
+        calInfo.create_dataset("cal_G", data=calibrationGain, dtype='D')
+        calInfo.create_dataset("cal_all", data=calibrationCoefficients, dtype='D')
 
         delayInfo = f.create_group("delayinfo")
-        delayInfo.create_dataset("delays", data=delay_ns, dtype='f')
-        delayInfo.create_dataset("rates", data=numpy.zeros((ntimes, nbeams, nants)), dtype='f')
-        delayInfo.create_dataset("time_array", data=times_unix, dtype='f')
-        delayInfo.create_dataset("jds", data=(times_unix/86400) + 2440587.5, dtype='f')
-        delayInfo.create_dataset("dut1", data=raw_header.get("DUT1", 0.0), dtype='f')
+        delayInfo.create_dataset("delays", data=delay_ns, dtype='d')
+        delayInfo.create_dataset("rates", data=numpy.zeros((ntimes, nbeams, nants)), dtype='d')
+        delayInfo.create_dataset("time_array", data=times_unix, dtype='d')
+        delayInfo.create_dataset("jds", data=(times_unix/86400) + 2440587.5, dtype='d')
+        delayInfo.create_dataset("dut1", data=raw_header.get("DUT1", 0.0), dtype='d')
 
         obsInfo = f.create_group("obsinfo")
         obsInfo.create_dataset("obsid", data=raw_header.get("OBSID", "Unknown").encode())
-        obsInfo.create_dataset("freq_array", data=frequencies_hz*1e-9, dtype='f') # GHz
-        obsInfo.create_dataset("phase_center_ra", data=phase_center.ra.rad, dtype='f') # radians
-        obsInfo.create_dataset("phase_center_dec", data=phase_center.dec.rad, dtype='f') # radians
-        obsInfo.create_dataset("primary_center_ra", data=primary_center.ra.rad, dtype='f') # radians
-        obsInfo.create_dataset("primary_center_dec", data=primary_center.dec.rad, dtype='f') # radians
+        obsInfo.create_dataset("freq_array", data=frequencies_hz*1e-9, dtype='d') # GHz
+        obsInfo.create_dataset("phase_center_ra", data=phase_center.ra.rad, dtype='d') # radians
+        obsInfo.create_dataset("phase_center_dec", data=phase_center.dec.rad, dtype='d') # radians
+        obsInfo.create_dataset("primary_center_ra", data=primary_center.ra.rad, dtype='d') # radians
+        obsInfo.create_dataset("primary_center_dec", data=primary_center.dec.rad, dtype='d') # radians
         obsInfo.create_dataset("instrument_name", data="COSMIC".encode())
 
         telInfo = f.create_group("telinfo")
-        telInfo.create_dataset("antenna_positions", data=antenna_positions, dtype='f')
+        telInfo.create_dataset("antenna_positions", data=antenna_positions, dtype='d')
         telInfo.create_dataset("antenna_position_frame", data=antenna_position_frame.encode())
         longest_antenna_name = max(*[len(name) for name in telescope_antenna_names])
         telInfo.create_dataset("antenna_names", data=numpy.array(telescope_antenna_names, dtype=f"S{longest_antenna_name}"), dtype=h5py.special_dtype(vlen=str))
         telInfo.create_dataset("antenna_numbers", data=numpy.array([antenna["number"] for antenna in telescope_info["antennas"] if antenna["name"] in antenna_names]), dtype='i')
-        telInfo.create_dataset("antenna_diameters", data=numpy.array([antenna.get("diameter", telescope_info.get("antenna_diameter", 0.0)) for antenna in telescope_info["antennas"] if antenna["name"] in antenna_names]), dtype='f')
-        telInfo.create_dataset("latitude", data=telescope_latitude, dtype='f')
-        telInfo.create_dataset("longitude", data=telescope_longitude, dtype='f')
-        telInfo.create_dataset("altitude", data=telescope_altitude, dtype='f')
+        telInfo.create_dataset("antenna_diameters", data=numpy.array([antenna.get("diameter", telescope_info.get("antenna_diameter", 0.0)) for antenna in telescope_info["antennas"] if antenna["name"] in antenna_names]), dtype='d')
+        telInfo.create_dataset("latitude", data=telescope_latitude, dtype='d')
+        telInfo.create_dataset("longitude", data=telescope_longitude, dtype='d')
+        telInfo.create_dataset("altitude", data=telescope_altitude, dtype='d')
         telInfo.create_dataset("telescope_name", data=telescope_info["telescope_name"].encode())
     
     return [output_filepath]
