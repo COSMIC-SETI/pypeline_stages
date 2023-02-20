@@ -62,6 +62,27 @@ def run(argstr, inputs, env, logger=None):
         help="The coordinates of the data's phase-center."
     )
     parser.add_argument(
+        "--raster-ra",
+        default=None,
+        metavar=("ra_offset_start", "ra_offset_stop", "ra_offset_step"),
+        nargs=3,
+        type=float,
+        help="The phase-center relative right-ascension range (in hours) for a raster set of beams (requires requires --raster-dec)."
+    )
+    parser.add_argument(
+        "--raster-dec",
+        default=None,
+        metavar=("dec_offset_start", "dec_offset_stop", "dec_offset_step"),
+        nargs=3,
+        type=float,
+        help="The phase-center relative declination range (in degrees) for a raster set of beams (requires --raster-ra)."
+    )
+    parser.add_argument(
+        "--ata-raw",
+        action="store_true",
+        help="Drop the last character of the RAW file's antenna names (the ATA antenna names have an L.O. character suffix)."
+    )
+    parser.add_argument(
         "--redis-hostname",
         type=str,
         default="redishost",
@@ -185,8 +206,10 @@ def run(argstr, inputs, env, logger=None):
     for i in range(100):
         key = f"ANTNMS{i:02d}"
         if key in raw_header:
-            # antenna_names += map(lambda x: x[:-1], raw_header[key].split(",")) 
-            antenna_names += raw_header[key].split(",")
+            if args.ata_raw:
+                antenna_names += map(lambda x: x[:-1], raw_header[key].split(",")) 
+            else:
+                antenna_names += raw_header[key].split(",")
 
     antenna_names[0:nants]
     logger.debug(f"RAW antenna_names: {antenna_names}")
@@ -262,7 +285,15 @@ def run(argstr, inputs, env, logger=None):
     times_unix = (start_time_unix + 0.5 * block_time_span_s) + numpy.arange(raw_blocks)*block_time_span_s
 
     beam_strs = []
-    if args.take_targets != 0:
+    raster_args = [args.raster_ra, args.raster_dec]
+    if any(raster_args):
+        assert all(raster_args), f"Must supply both raster arguments for raster beams to be generated"
+
+        for ra_index, ra in enumerate(numpy.arange(*args.raster_ra)):
+            for dec_index, dec in enumerate(numpy.arange(*args.raster_dec)):
+                beam_strs.append(f"{phase_center.ra.deg*12.0/180.0 + ra},{phase_center.dec.deg + dec},raster_{ra_index}_{dec_index}")
+
+    elif args.take_targets != 0:
         redis_obj = redis.Redis(host=args.redis_hostname, port=args.redis_port)
         if args.targets_redis_key_timestamp is None:
             file_start_packet_index = raw_header["SYNCTIME"] + raw_header["PKTIDX"]
