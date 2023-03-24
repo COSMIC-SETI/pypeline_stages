@@ -6,7 +6,6 @@ then
   exit 1
 else
 	cp ./pypeline@.service /etc/systemd/system/
-	cp ./pypeline_service.conf /mnt/slow/operations/share/
 
 	systemctl disable pypeline@
 	systemctl daemon-reload
