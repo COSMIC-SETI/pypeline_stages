@@ -8,7 +8,7 @@ Requires=network.target
 EnvironmentFile=/home/cosmic/src/pypeline_stages/systemd_service/pypeline_service.conf
 Restart=on-failure
 Type=simple
-ExecStart=/home/cosmic/anaconda3/envs/cosmic_vla/bin/python3 /home/cosmic/anaconda3/envs/cosmic_vla/bin/pypeline %i hpdaq --workers $PYPELINE_WORKERS --queue-limit $PYPELINE_QUEUE_LIMIT --log-directory $PYPELINE_LOG_DIRECTORY
+ExecStart=/home/cosmic/anaconda3/envs/cosmic_vla/bin/python3 /home/cosmic/anaconda3/envs/cosmic_vla/bin/pypeline %i hpdaq --workers $PYPELINE_WORKERS --queue-limit $PYPELINE_QUEUE_LIMIT --log-directory $PYPELINE_LOG_DIRECTORY --log-backup-days $PYPELINE_LOG_BACKUPS -vv
 StandardOutput=append:/var/log/pypeline_%i.log
 StandardError=append:/var/log/pypeline_%i.log
 
