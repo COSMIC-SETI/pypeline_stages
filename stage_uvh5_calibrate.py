@@ -5,10 +5,18 @@ import argparse
 
 import common
 
+from Pypeline import replace_keywords
+
 ENV_KEY = "UVH5CalibrateENV"
 ARG_KEY = "UVH5CalibrateARG"
 INP_KEY = "UVH5CalibrateINP"
 NAME = "uvh5_calibrate"
+
+CONTEXT = {
+    "PROJID": None,
+    "OBSID": None,
+    "DATASET": None,
+}
 
 def run(argstr, inputs, env, logger=None):
     if logger is None:
@@ -29,6 +37,7 @@ def run(argstr, inputs, env, logger=None):
     # )
     # args = parser.parse_args(argstr.split(" "))
 
+    argstr = replace_keywords(CONTEXT, argstr)
     cmd = f"/home/cosmic/anaconda3/envs/cosmic_vla/bin/python3 /home/cosmic/dev/COSMIC-VLA-CalibrationEngine/calibrate_uvh5.py -d {inputs[0]} {argstr}"
 
     env_base = os.environ.copy()

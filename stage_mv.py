@@ -3,6 +3,8 @@ import glob
 import os
 import argparse
 import logging
+import shutil
+from common import makedirs
 
 from Pypeline import replace_keywords
 
@@ -14,6 +16,7 @@ NAME = "mv"
 CONTEXT = {
     "PROJID": None,
     "OBSID": None,
+    "DATASET": None,
 }
 
 def run(argstr, inputs, env, logger=None):
@@ -44,8 +47,8 @@ def run(argstr, inputs, env, logger=None):
     args = parser.parse_args(arglist)
 
     if not os.path.exists(args.destination_dirpath):
-        logger.info(f"Creating destination directory: {args.destination_dirpath}.")
-        os.makedirs(args.destination_dirpath)
+        logger.info(f"Creating destination directory: {args.destination_dirpath}")
+        makedirs(args.destination_dirpath, user="cosmic", group="cosmic", mode=0o777)
 
     all_copied = []
     for inputpath in inputs:
@@ -60,6 +63,7 @@ def run(argstr, inputs, env, logger=None):
         output = subprocess.run(cmd, capture_output=True)
         if output.returncode != 0:
             raise RuntimeError(output.stderr.decode())
+        shutil.chown(destinationpath, user="cosmic", group="cosmic")
             
         all_copied.append(destinationpath)
 

@@ -16,7 +16,22 @@ def run(argstr, inputs, env, logger=None):
         logger.error("bfr5_generate requires one input, the RAW filepath.")
         return None
     
-    arg_values = argstr.split(' ') + inputs
+    arg_strs = argstr.split('"')
+
+    arg_values = []
+    for argstr_index, arg_str in enumerate(arg_strs):
+        if argstr_index%2 == 1:
+            # argstr was encapsulated in quotations
+            arg_values.append(arg_str)
+        elif len(arg_str.strip()) > 0:
+            argstr_values = arg_str.strip().split(" ")
+            if argstr_index == len(arg_strs)-1 and len(arg_strs)%2 == 0:
+                argstr_values[0] = f'"{argstr_values[0]}'
+
+            arg_values += argstr_values
+
+    logger.debug(f"arg_values: {arg_values}")
+    arg_values += inputs
 
     if any(arg in arg_values for arg in ['--take-targets', '--target']):
         return [entrypoints.generate_targets_for_raw(arg_values)]
@@ -34,7 +49,10 @@ if __name__ == "__main__":
     args = [
         "--telescope-info-toml-filepath",
         "/home/cosmic/src/telinfo_vla.toml",
-        "/mnt/buf0/mydonsol_blade/bladetest_vlass_32c_128k.0000.raw"
+        "--targets-redis-key-prefix", "targets:VLA-COSMIC:vlass_array",
+        "--take-targets", "0",
+        "--target", '"Voyager 1"',
+        "/mnt/buf0/test/GUPPI/20A-346.sb43317053.eb43427915.59964.7706725926.70.1_AC_8BIT.0000.raw"
     ]
     
     if len(sys.argv) > 1:

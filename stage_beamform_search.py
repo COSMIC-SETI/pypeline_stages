@@ -80,6 +80,12 @@ def _add_args(parser):
         help="Whether or not to write out the beamformed data.",
     )
     parser.add_argument(
+        "-I",
+        "--incoherent-beam",
+        action="store_true",
+        help="Form the incoherent beams.",
+    )
+    parser.add_argument(
         "-gs",
         "--gpu-shares",
         type=int,
@@ -97,6 +103,14 @@ def _add_args(parser):
         "-gt",
         "--gpu-target-most-memory",
         action="store_true",
+        help="Target the GPU with the most free memory.",
+    )
+    parser.add_argument(
+        "-pl",
+        "--gpu-power-limit",
+        type=int,
+        choices=range(100,141),
+        default=100,
         help="Target the GPU with the most free memory.",
     )
 
@@ -132,6 +146,8 @@ def run(argstr, inputs, env, logger=None):
     ]
     if args.drift_rate_zero_excluded:
         cmd.append('-Z')
+    if args.incoherent_beam:
+        cmd.append('-I')
     
     cmd.extend([
         "-s", str(args.snr_threshold),
@@ -149,6 +165,12 @@ def run(argstr, inputs, env, logger=None):
 
     env_base = os.environ.copy()
     env_base.update(common.env_str_to_dict(env))
+
+    # power limit
+    powerlimit_cmd = [
+        "nvidia-smi",
+        "-pl", str(args.gpu_power_limit),
+    ]
 
     if args.gpu_target_most_memory:
         nvidia_query_cmd = "nvidia-smi --query-gpu=index,name,pci.bus_id,driver_version,pstate,utilization.gpu,utilization.memory,memory.total,memory.free --format=csv"
@@ -180,6 +202,15 @@ def run(argstr, inputs, env, logger=None):
                 logger.warning(f"Overriding CUDA_VISIBLE_DEVICES={env_base['CUDA_VISIBLE_DEVICES']}.")
             env_base["CUDA_VISIBLE_DEVICES"] = nvidia_id
 
+            powerlimit_cmd += [
+                "-i", str(nvidia_id),
+            ]
+
+    logger.debug(f"{powerlimit_cmd}")
+    output = subprocess.run(powerlimit_cmd, capture_output=True)
+    if output.returncode != 0:
+        logger.error(output.stderr.decode())
+
     output = subprocess.run(cmd, env=env_base, capture_output=True)
     if output.returncode != 0:
         stderr_output = output.stderr.decode()
@@ -188,7 +219,7 @@ def run(argstr, inputs, env, logger=None):
 
         logger.error(stderr_output)
         raise RuntimeError(stderr_output)
-    logger.info(output.stdout.decode().split('\n')[-1])
+    logger.info(output.stdout.decode().strip().split('\n')[-1])
     
     outputs = glob.glob(f"{args.output_stempath}.seticore.*")
     outputs.extend(glob.glob(f"{args.output_stempath}-beam*.fil"))

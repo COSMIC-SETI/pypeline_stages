@@ -43,12 +43,13 @@ class DaqState:
 
 STATE_hpkv = None
 STATE_hpkv_cache = None
+STATE_recording_exhausted = True
 STATE_env = {}
 STATE_prev_daq = DaqState.Unknown
 STATE_current_daq = DaqState.Idle
 STATE_all_parts = []
 STATE_processed_parts = []
-STATE_parts_to_process = []
+STATE_part_to_process = []
 
 
 def setup(hostname, instance, logger=None):
@@ -62,34 +63,42 @@ def setup(hostname, instance, logger=None):
 
 
 def dehydrate():
-    global STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts, STATE_parts_to_process
-    return (
-        (STATE_hpkv.hostname, STATE_hpkv.instance_id, "redishost"),
-        STATE_env, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts, STATE_parts_to_process
-    )
+    global STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts, STATE_part_to_process
+    return {
+        "hostname": STATE_hpkv.hostname,
+        "instance_id": STATE_hpkv.instance_id,
+        "env": STATE_env, 
+        "hpkv_cache": STATE_hpkv_cache, 
+        "prev_daq": STATE_prev_daq, 
+        "current_daq": STATE_current_daq, 
+        "all_parts": STATE_all_parts, 
+        "processed_parts": STATE_processed_parts, 
+        "part_to_process": STATE_part_to_process
+    }
 
 
-def rehydrate(dehydration_tuple):
-    global STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts, STATE_parts_to_process
+def rehydrate(dehydration_dict):
+    global STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts, STATE_part_to_process
+
     STATE_hpkv = HashpipeKeyValues(
-        dehydration_tuple[0][0],
-        dehydration_tuple[0][1],
-        redis.Redis(dehydration_tuple[0][2], decode_responses=True)
+        dehydration_dict["hostname"],
+        dehydration_dict["instance_id"],
+        redis.Redis("redishost", decode_responses=True)
     )
-    STATE_env = dehydration_tuple[1]
-    STATE_hpkv_cache = dehydration_tuple[2]
-    STATE_prev_daq = dehydration_tuple[3]
-    STATE_current_daq = dehydration_tuple[4]
-    STATE_all_parts = dehydration_tuple[5]
-    STATE_processed_parts = dehydration_tuple[6]
-    STATE_parts_to_process = dehydration_tuple[7]
+    STATE_env = dehydration_dict["env"]
+    STATE_hpkv_cache = dehydration_dict["hpkv_cache"]
+    STATE_prev_daq = dehydration_dict["prev_daq"]
+    STATE_current_daq = dehydration_dict["current_daq"]
+    STATE_all_parts = dehydration_dict["all_parts"]
+    STATE_processed_parts = dehydration_dict["processed_parts"]
+    STATE_part_to_process = dehydration_dict["part_to_process"]
 
 
 def run(env=None, logger=None):
     if logger is None:
         logger = logging.getLogger(NAME)
     
-    global STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts, STATE_parts_to_process
+    global STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts, STATE_part_to_process, STATE_recording_exhausted
     # TODO probably ought to only do this when env is a different value
     STATE_env.clear()
     STATE_env.update(common.env_str_to_dict(env))
@@ -101,63 +110,75 @@ def run(env=None, logger=None):
         if STATE_current_daq != STATE_prev_daq:
             logger.info(f"daqstate: {daqstate}, STATE_current_daq: {STATE_current_daq}, STATE_prev_daq: {DaqState.encode_daqstate(STATE_prev_daq)}")
     elif STATE_prev_daq != DaqState.Unknown:
-        STATE_prev_daq = DaqState.Unknown
-        logger.warning("DaqState is None.")
+        logger.warning(f"DaqState is None, previously was {STATE_current_daq}")
+        return None
 
     record_started = STATE_prev_daq != DaqState.Record and STATE_current_daq == DaqState.Record
     record_ongoing = STATE_current_daq == DaqState.Record
     record_finished = STATE_prev_daq == DaqState.Record and STATE_current_daq == DaqState.Idle
     # logger.debug(f"started: {record_started} , ongoing: {record_ongoing} , finished: {record_finished}")
 
-    STATE_parts_to_process = None
-    latest_list_of_parts = list(
+    STATE_part_to_process = None
+    stem_path = os.path.join(*map(str, STATE_hpkv.observation_stempath))
+    STATE_all_parts = list(
         filter(
             os.path.isfile,
-            glob.glob(f"{os.path.join(*map(str, STATE_hpkv.observation_stempath))}*.raw")
+            glob.glob(f"{stem_path}*.????.raw")
         )
     )
-    latest_list_of_parts.sort(key=lambda x: os.path.getmtime(x))
+    STATE_all_parts.sort(key=lambda x: os.path.getmtime(x))
 
-    novel_parts = [part for part in latest_list_of_parts if part not in STATE_all_parts]
-    unprocessed_parts = [part for part in STATE_all_parts if part not in STATE_processed_parts]
+    unprocessed_parts = list(
+        filter(
+            lambda part: part not in STATE_processed_parts,
+            STATE_all_parts
+        )
+    )
     
     if record_started:
-        # first part is opened, store it and move on
-        STATE_all_parts.clear()
+        if not STATE_recording_exhausted:
+            logger.warning(f"New recording started but previous files were not fully processed.")
+
+        STATE_recording_exhausted = False
         STATE_processed_parts.clear()
-        novel_parts = latest_list_of_parts
-        logger.info(f"Recording has started. Initial parts: {latest_list_of_parts}")
-        if len(novel_parts) > 1:
-            STATE_parts_to_process = novel_parts[0]
+        logger.info(f"Recording has started. Initial parts: {STATE_all_parts}")
+        if len(STATE_all_parts) > 1:
+            # if more than one part, consider the first complete
+            STATE_part_to_process = STATE_all_parts[0]
     
     elif record_ongoing:
-        if len(novel_parts) > 0 or len(unprocessed_parts) > 1:
+        if len(unprocessed_parts) > 1:
             # new parts mean the previous are complete
-            STATE_parts_to_process = unprocessed_parts
+            STATE_part_to_process = unprocessed_parts[0]
 
     elif record_finished:
         logger.info(f"Recording has finished.")
         # remaining unprocessed parts are taken to be complete
-        STATE_parts_to_process = unprocessed_parts
+        if len(unprocessed_parts) > 0:
+            STATE_part_to_process = unprocessed_parts[0]
         if STATE_hpkv.get("PKTSTART") == STATE_hpkv.get("PKTSTOP"):
-            logger.info(f"Recording was cancelled. Not processing remaining parts: {STATE_parts_to_process}")
-            STATE_parts_to_process = None
-    elif len(unprocessed_parts) > 0:
-        logger.info(f"Residual files to process after recording has finished: {len(unprocessed_parts)}.")
+            logger.info(f"Recording was cancelled. Not processing remaining parts: {STATE_part_to_process}")
+            STATE_processed_parts += unprocessed_parts
+            STATE_part_to_process = None
+
+    elif not STATE_recording_exhausted:
+        STATE_recording_exhausted = len(unprocessed_parts) <= 1
+        logger.info(f"Residual files to process after recording has finished: {unprocessed_parts}.")
         # remaining unprocessed parts are taken to be complete
-        STATE_parts_to_process = unprocessed_parts
+        if len(unprocessed_parts) >= 1:
+            STATE_part_to_process = unprocessed_parts[0]
     else:
         # not recording and procesed everything
-        return None
+        STATE_part_to_process = None
 
     STATE_hpkv_cache = STATE_hpkv.get_cache()
-    STATE_all_parts += novel_parts
-    if STATE_parts_to_process is not None:
-        # take one at a time
-        STATE_parts_to_process = STATE_parts_to_process[0:1]
-        STATE_processed_parts += STATE_parts_to_process
 
-    return STATE_parts_to_process
+    if STATE_part_to_process is not None:
+        STATE_processed_parts.append(STATE_part_to_process)
+
+        return [STATE_part_to_process]
+    else:
+        return None
 
 
 def setupstage(stage, logger = None):
@@ -183,7 +204,7 @@ def setupstage(stage, logger = None):
 
 
 def note(processnote: ProcessNote, **kwargs):
-    global STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_parts_to_process
+    global STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_part_to_process
 
     if "POSTPROC_PROGRESS_REDIS_CHANNEL" not in STATE_env:
         return
@@ -196,6 +217,7 @@ def note(processnote: ProcessNote, **kwargs):
         "instance_id": STATE_hpkv.instance_id,
         "observation_id": STATE_hpkv_cache.get("OBSID"),
         "process_id": str(kwargs["process_id"]),
+        "context_outputs": [STATE_part_to_process],
     }
     try:
         progress_statement["process_note"] = ProcessNote.string(processnote)
@@ -203,7 +225,7 @@ def note(processnote: ProcessNote, **kwargs):
         progress_statement["process_note"] = "Unknown"
 
     if processnote == ProcessNote.Start:
-        progress_statement["context_outputs"] = STATE_parts_to_process
+        pass
     elif processnote == ProcessNote.StageStart:
         progress_statement["stage_name"] = kwargs["stage"].NAME
         progress_statement["stage_inputs"] = kwargs["inpvalue"]
@@ -219,15 +241,14 @@ def note(processnote: ProcessNote, **kwargs):
     elif processnote == ProcessNote.Finish:
         pass
     elif processnote == ProcessNote.Error:
-        progress_statement["context_outputs"] = STATE_parts_to_process
         progress_statement["error"] = repr(kwargs["error"])
         progress_statement["traceback"] = traceback.format_exc()
-        for output in STATE_parts_to_process:
-            try:
-                os.remove(output)
-                kwargs["logger"].warning(f"Process failed. Removed {output}.")
-            except:
-                kwargs["logger"].warning(f"Process failed but could not remove {output} ({traceback.format_exc()}).")
+
+        try:
+            os.remove(STATE_part_to_process)
+            kwargs["logger"].warning(f"Process failed. Removed {STATE_part_to_process}.")
+        except:
+            kwargs["logger"].warning(f"Process failed but could not remove {STATE_part_to_process} ({traceback.format_exc()}).")
         
 
     kwargs["logger"].debug(progress_statement)
