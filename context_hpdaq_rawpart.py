@@ -244,11 +244,14 @@ def note(processnote: ProcessNote, **kwargs):
         progress_statement["error"] = repr(kwargs["error"])
         progress_statement["traceback"] = traceback.format_exc()
 
+    if STATE_env.get("POSTPROC_REMOVE_FAILURES", "true").lower() != "false":
         try:
             os.remove(STATE_part_to_process)
             kwargs["logger"].warning(f"Process failed. Removed {STATE_part_to_process}.")
         except:
             kwargs["logger"].warning(f"Process failed but could not remove {STATE_part_to_process} ({traceback.format_exc()}).")
+    else:
+        kwargs["logger"].warning(f"Not removing {STATE_part_to_process}.")
         
 
     kwargs["logger"].debug(progress_statement)

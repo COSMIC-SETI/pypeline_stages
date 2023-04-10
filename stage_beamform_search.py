@@ -113,6 +113,12 @@ def _add_args(parser):
         default=100,
         help="Target the GPU with the most free memory.",
     )
+    parser.add_argument(
+        "-l",
+        "--log-blade-output",
+        action="store_true"
+        help="Log the printout from BLADE in *.blade.stdout.txt.",
+    )
 
 def run(argstr, inputs, env, logger=None):
     global CONTEXT
@@ -139,6 +145,7 @@ def run(argstr, inputs, env, logger=None):
 
     cmd = [
         "blade-cli",
+        "-P", # disable progress-bar
         "--input-type", "CI8",
         "--output-type", "CF32" if not args.output_beamformed_filterbank else "F32",
         "-t", "ATA",
@@ -212,17 +219,25 @@ def run(argstr, inputs, env, logger=None):
         logger.error(output.stderr.decode())
 
     output = subprocess.run(cmd, env=env_base, capture_output=True)
+    stdoutput = output.stdout.decode().strip()
+    logger.info(f"Last stdout line: `{stdoutput.split('\n')[-1]}`")
+    
     if output.returncode != 0:
         stderr_output = output.stderr.decode()
         if len(stderr_output) == 0:
             stderr_output = f"Nothing in stderr, possibly a more serious issue (segfault)."
 
-        logger.error(stderr_output)
+        logger.error(stderr_output.strip())
         raise RuntimeError(stderr_output)
-    logger.info(output.stdout.decode().strip().split('\n')[-1])
-    
+
     outputs = glob.glob(f"{args.output_stempath}.seticore.*")
     outputs.extend(glob.glob(f"{args.output_stempath}-beam*.fil"))
+
+    if args.log_blade_output:
+        log_outputfilepath = f"{args.output_stempath}*.blade.stdout.txt"
+        with open(log_outputfilepath, "w") as fio:
+            fio.write(stdoutput)
+        outputs.append(log_outputfilepath)
 
     logger.info(f"Outputs: {outputs}")
     return outputs
