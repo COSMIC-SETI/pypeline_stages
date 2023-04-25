@@ -235,7 +235,7 @@ def run(argstr, inputs, env, logger=None):
     outputs.extend(glob.glob(f"{args.output_stempath}-beam*.fil"))
 
     if args.log_blade_output:
-        log_outputfilepath = f"{args.output_stempath}*.blade.stdout.txt"
+        log_outputfilepath = f"{args.output_stempath}.blade.stdout.txt"
         with open(log_outputfilepath, "w") as fio:
             fio.write(stdoutput)
         outputs.append(log_outputfilepath)
@@ -250,7 +250,7 @@ if __name__ == "__main__":
     logger.addHandler(logging.StreamHandler())
     logger.setLevel(logging.INFO)
 
-    if len(sys.argv) == 1:
+    if len(sys.argv) <= 2:
         args = []
         inputs = [
             "/mnt/buf0/delay_modeling_comm_Bco/GUPPI/TCOS0001_S_3000.59963.98997351852.2.1_AC_8BIT.0000.raw",
