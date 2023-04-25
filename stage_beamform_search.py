@@ -116,7 +116,7 @@ def _add_args(parser):
     parser.add_argument(
         "-l",
         "--log-blade-output",
-        action="store_true"
+        action="store_true",
         help="Log the printout from BLADE in *.blade.stdout.txt.",
     )
 
@@ -220,7 +220,8 @@ def run(argstr, inputs, env, logger=None):
 
     output = subprocess.run(cmd, env=env_base, capture_output=True)
     stdoutput = output.stdout.decode().strip()
-    logger.info(f"Last stdout line: `{stdoutput.split('\n')[-1]}`")
+    stdoutput_last_line = stdoutput.split('\n')[-1]
+    logger.info(f"Last stdout line: `{stdoutput_last_line}`")
     
     if output.returncode != 0:
         stderr_output = output.stderr.decode()
