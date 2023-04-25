@@ -1,8 +1,10 @@
 #!/usr/bin/env python
-import logging, os, argparse, json, glob
+import logging, os, argparse, json, glob, subprocess, shutil
 from datetime import datetime
-
 import h5py
+import sqlalchemy
+
+from Pypeline import replace_keywords
 
 from cosmic_database import entities
 from cosmic_database.engine import CosmicDB_Engine
@@ -35,6 +37,7 @@ def run(argstr, inputs, env, logger=None):
         description="Commit CosmicDB_Beam entities from BFR5 file."
     )
     parser.add_argument(
+        "-c",
         "--cosmicdb-engine-conf",
         type=str,
         required=True,
@@ -72,10 +75,18 @@ def run(argstr, inputs, env, logger=None):
 
     cosmicdb_engine = CosmicDB_Engine(engine_conf_yaml_filepath=args.cosmicdb_engine_conf)
     with cosmicdb_engine.session() as session:
-        for beam_i, beam_source in enumerate(bfr5["beaminfo"]["src_names"]):
+        beam_src_names = list(map(lambda s: s.decode(), bfr5["beaminfo"]["src_names"][:]))
+        beam_ras = list(bfr5["beaminfo"]["ras"][:])
+        beam_decs = list(bfr5["beaminfo"]["decs"][:])
+
+        beam_src_names.append("Incoherent")
+        beam_ras.append(bfr5["obsinfo"]["phase_center_ra"][()])
+        beam_decs.append(bfr5["obsinfo"]["phase_center_dec"][()])
+
+        for beam_i, beam_source in enumerate(beam_src_names):
             scan_id = bfr5["obsinfo"]["obsid"][()].decode()
-            beam_time_start = datetime.fromtimestamp(bfr5["delayinf"]["time_array"][0])
-            beam_time_end = datetime.fromtimestamp(bfr5["delayinf"]["time_array"][-1])
+            beam_time_start = datetime.fromtimestamp(bfr5["delayinfo"]["time_array"][0])
+            beam_time_end = datetime.fromtimestamp(bfr5["delayinfo"]["time_array"][-1])
 
             db_obs = session.scalars(
                 sqlalchemy.select(entities.CosmicDB_Observation)
@@ -90,9 +101,9 @@ def run(argstr, inputs, env, logger=None):
 
             db_beam_fields = {
                 "observation_id": db_obs.id,
-                "ra_radians": bfr5["beaminfo"]["ras"][beam_i],
-                "dec_radians": bfr5["beaminfo"]["decs"][beam_i],
-                "source": beam_source.decode(),
+                "ra_radians": beam_ras[beam_i],
+                "dec_radians": beam_decs[beam_i],
+                "source": beam_source,
                 "start": beam_time_start,
                 "end": beam_time_end,
             }
@@ -116,13 +127,17 @@ def run(argstr, inputs, env, logger=None):
             beam_index_to_db_id_map[beam_i] = db_beam.id
             beam_index_to_obs_id_map[beam_i] = db_beam.observation_id
         
+        logger.debug(f"Beam index to DB BeamID map: {beam_index_to_db_id_map}")
+        logger.debug(f"Beam index to Observation ID map: {beam_index_to_obs_id_map}")
+
         for stamps_filepath in stamps_filepaths:
-            for stamp_enum, stamp in enumerate(seticore_viewer.read_stamps(stamps_filepath)):
+            for stamp_enum, _stamp in enumerate(seticore_viewer.read_stamps(stamps_filepath)):
+                stamp = _stamp.stamp
                 session.add(
                     entities.CosmicDB_ObservationStamp(
-                        observation_id = beam_index_to_obs_id_map[stamp.beam],
+                        observation_id = beam_index_to_obs_id_map[stamp.signal.beam],
                         tuning = CONTEXT["TUNING"],
-                        subband_offset = CONTEXT["SCHAN"],
+                        subband_offset = int(CONTEXT["SCHAN"]),
 
                         file_uri = input_to_output_filepath_map[stamps_filepath],
                         file_local_enumeration = stamp_enum,
@@ -145,18 +160,18 @@ def run(argstr, inputs, env, logger=None):
                         schan = stamp.schan,
                         obsid = stamp.obsid,
 
-                        signal_frequency = hit.signal.frequency,
-                        signal_index = hit.signal.index,
-                        signal_drift_steps = hit.signal.driftSteps,
-                        signal_drift_rate = hit.signal.driftRate,
-                        signal_snr = hit.signal.snr,
-                        signal_coarse_channel = hit.signal.coarseChannel,
-                        signal_beam = hit.signal.beam,
-                        signal_num_timesteps = hit.signal.numTimesteps,
-                        signal_power = hit.signal.power,
-                        signal_incoherent_power = hit.signal.incoherentPower,
+                        signal_frequency = stamp.signal.frequency,
+                        signal_index = stamp.signal.index,
+                        signal_drift_steps = stamp.signal.driftSteps,
+                        signal_drift_rate = stamp.signal.driftRate,
+                        signal_snr = stamp.signal.snr,
+                        signal_coarse_channel = stamp.signal.coarseChannel,
+                        signal_beam = stamp.signal.beam,
+                        signal_num_timesteps = stamp.signal.numTimesteps,
+                        signal_power = stamp.signal.power,
+                        signal_incoherent_power = stamp.signal.incoherentPower,
 
-                        beam_id = beam_index_to_db_id_map[hit.signal.beam],
+                        beam_id = beam_index_to_db_id_map[stamp.signal.beam],
                     )
                 )
         session.commit()
@@ -202,13 +217,13 @@ def run(argstr, inputs, env, logger=None):
     # Move the files
     if not os.path.exists(args.destination_dirpath):
         logger.info(f"Creating destination directory: {args.destination_dirpath}")
-        makedirs(args.destination_dirpath, user="cosmic", group="cosmic", mode=0o777)
+        common.makedirs(args.destination_dirpath, user="cosmic", group="cosmic", mode=0o777)
 
     all_moved = []
     for inputpath in inputs:
         destinationpath = input_to_output_filepath_map[inputpath]
         cmd = [
-            "mv" if not args.copy else "cp",
+            "mv",
             inputpath,
             destinationpath
         ]
