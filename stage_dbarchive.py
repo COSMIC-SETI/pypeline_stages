@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import logging, os, argparse, json, glob, subprocess, shutil
+import logging, os, argparse, json, glob, subprocess, shutil, math
 from datetime import datetime
 import h5py
 import sqlalchemy
@@ -49,6 +49,11 @@ def run(argstr, inputs, env, logger=None):
         type=str,
         required=True,
         help="The destination directory.",
+    )
+    parser.add_argument(
+        "--mv-instead-of-rsync",
+        action="store_true",
+        help="Instead of using rsync, just use 'mv'.",
     )
     if argstr is None:
         argstr = ""
@@ -164,7 +169,7 @@ def run(argstr, inputs, env, logger=None):
                         signal_index = stamp.signal.index,
                         signal_drift_steps = stamp.signal.driftSteps,
                         signal_drift_rate = stamp.signal.driftRate,
-                        signal_snr = stamp.signal.snr,
+                        signal_snr = stamp.signal.snr if stamp.signal.snr != math.inf else -1.0,
                         signal_coarse_channel = stamp.signal.coarseChannel,
                         signal_beam = stamp.signal.beam,
                         signal_num_timesteps = stamp.signal.numTimesteps,
@@ -191,7 +196,7 @@ def run(argstr, inputs, env, logger=None):
                         signal_index = hit.signal.index,
                         signal_drift_steps = hit.signal.driftSteps,
                         signal_drift_rate = hit.signal.driftRate,
-                        signal_snr = hit.signal.snr,
+                        signal_snr = hit.signal.snr if hit.signal.snr != math.inf else -1.0,
                         signal_coarse_channel = hit.signal.coarseChannel,
                         signal_beam = hit.signal.beam,
                         signal_num_timesteps = hit.signal.numTimesteps,
@@ -223,7 +228,7 @@ def run(argstr, inputs, env, logger=None):
     for inputpath in inputs:
         destinationpath = input_to_output_filepath_map[inputpath]
         cmd = [
-            "mv",
+            "mv" if args.mv_instead_of_rsync else 'rsync',
             inputpath,
             destinationpath
         ]
@@ -231,7 +236,14 @@ def run(argstr, inputs, env, logger=None):
         output = subprocess.run(cmd, capture_output=True)
         if output.returncode != 0:
             raise RuntimeError(output.stderr.decode())
-        shutil.chown(destinationpath, user="cosmic", group="cosmic")
+        
+        if args.mv_instead_of_rsync:
+            shutil.chown(destinationpath, user="cosmic", group="cosmic")
+        else:
+            try:
+                os.remove(inputpath)
+            except:
+                logger.error(f"Failed to remove {inputpath} ({traceback.format_exc()}).")
             
         all_moved.append(destinationpath)
     return all_moved
