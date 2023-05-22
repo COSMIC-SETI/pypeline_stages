@@ -3,6 +3,7 @@ import glob
 import json
 import logging
 import traceback
+import time
 
 import redis
 
@@ -41,6 +42,7 @@ class DaqState:
         return "unknown"
 
 
+STATE_notes = {}
 STATE_hpkv = None
 STATE_hpkv_cache = None
 STATE_recording_exhausted = True
@@ -65,6 +67,7 @@ def setup(hostname, instance, logger=None):
 def dehydrate():
     global STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts, STATE_part_to_process
     return {
+        "notes": STATE_notes,
         "hostname": STATE_hpkv.hostname,
         "instance_id": STATE_hpkv.instance_id,
         "env": STATE_env, 
@@ -78,8 +81,9 @@ def dehydrate():
 
 
 def rehydrate(dehydration_dict):
-    global STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts, STATE_part_to_process
+    global STATE_notes, STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_all_parts, STATE_processed_parts, STATE_part_to_process
 
+    STATE_notes = dehydration_dict["notes"]
     STATE_hpkv = HashpipeKeyValues(
         dehydration_dict["hostname"],
         dehydration_dict["instance_id"],
@@ -204,7 +208,7 @@ def setupstage(stage, logger = None):
 
 
 def note(processnote: ProcessNote, **kwargs):
-    global STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_part_to_process
+    global STATE_notes, STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_part_to_process
 
     if "POSTPROC_PROGRESS_REDIS_CHANNEL" not in STATE_env:
         return
@@ -225,33 +229,59 @@ def note(processnote: ProcessNote, **kwargs):
         progress_statement["process_note"] = "Unknown"
 
     if processnote == ProcessNote.Start:
-        pass
+        STATE_notes["start"] = time.time()
+        STATE_notes["stages"] = {}
     elif processnote == ProcessNote.StageStart:
-        progress_statement["stage_name"] = kwargs["stage"].NAME
+        stage_name = kwargs["stage"].NAME
+        STATE_notes["stages"][stage_name] = {
+            "start": time.time()
+        }
+
+        progress_statement["stage_name"] = stage_name
         progress_statement["stage_inputs"] = kwargs["inpvalue"]
         progress_statement["stage_arguments"] = kwargs["argvalue"]
         progress_statement["stage_environment"] = kwargs["envvalue"]
     elif processnote == ProcessNote.StageFinish:
-        progress_statement["stage_name"] = kwargs["stage"].NAME
+        stage_name = kwargs["stage"].NAME
+        time_now = time.time()
+        STATE_notes["stages"][stage_name]["finish"] = time_now
+        stage_duration = time_now - STATE_notes["stages"][stage_name]["start"]
+        
+        kwargs["logger"].info(f"Stage '{stage_name}' finished after {stage_duration}")
+
+        progress_statement["stage_name"] = stage_name
         progress_statement["stage_output"] = kwargs["output"]
     elif processnote == ProcessNote.StageError:
-        progress_statement["stage_name"] = kwargs["stage"].NAME
+        stage_name = kwargs["stage"].NAME
+        time_now = time.time()
+        STATE_notes["stages"][stage_name]["error"] = time.time()
+        stage_duration = time_now - STATE_notes["stages"][stage_name]["start"]
+        
+        kwargs["logger"].info(f"Stage '{stage_name}' errored after {stage_duration}")
+
+        progress_statement["stage_name"] = stage_name
         progress_statement["error"] = repr(kwargs["error"])
         progress_statement["traceback"] = traceback.format_exc()
     elif processnote == ProcessNote.Finish:
-        pass
+        STATE_notes["finish"] = time.time()
+        kwargs["logger"].info(_get_notes_summary(STATE_notes))
     elif processnote == ProcessNote.Error:
+        STATE_notes["error"] = time.time()
+        logger = kwargs["logger"]
+
         progress_statement["error"] = repr(kwargs["error"])
         progress_statement["traceback"] = traceback.format_exc()
 
         if STATE_env.get("POSTPROC_REMOVE_FAILURES", "true").lower() != "false":
             try:
                 os.remove(STATE_part_to_process)
-                kwargs["logger"].warning(f"Process failed. Removed {STATE_part_to_process}.")
+                logger.warning(f"Process failed. Removed {STATE_part_to_process}.")
             except:
-                kwargs["logger"].warning(f"Process failed but could not remove {STATE_part_to_process} ({traceback.format_exc()}).")
+                logger.warning(f"Process failed but could not remove {STATE_part_to_process} ({traceback.format_exc()}).")
         else:
-            kwargs["logger"].warning(f"Not removing {STATE_part_to_process}.")
+            logger.warning(f"Not removing {STATE_part_to_process}.")
+
+        logger.info(_get_notes_summary(STATE_notes))
         
 
     kwargs["logger"].debug(progress_statement)
@@ -259,6 +289,28 @@ def note(processnote: ProcessNote, **kwargs):
         redis_channel,
         json.dumps(progress_statement)
     )
+
+
+def _get_notes_summary(notes: dict):
+    summary = "No stages to summarise..."
+    if "stages" in notes:
+        summary = "Summary:"
+        for stage, stage_times in notes["stages"].items():
+            tA, tB = stage_times.values()
+            summary += f"\n\t{stage}: {abs(tB-tA):0.2f} s"
+            if "error" in stage_times.keys():
+                summary += " (Errored)"
+
+    if "start" in notes:
+        duration = - notes["start"]
+        if "error" in notes:
+            duration += notes["error"]
+        elif "finish" in notes:
+            duration += notes["finish"]
+        else:
+            duration += time.time()
+        summary += f"\nTotal elapsed: {duration:0.2f} s"
+    return summary
 
 
 if __name__ == "__main__":
