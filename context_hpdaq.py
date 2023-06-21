@@ -7,6 +7,8 @@ from Pypeline import ProcessNote
 
 from hashpipe_keyvalues.standard import HashpipeKeyValues
 
+import common
+
 NAME = "hpdaq"
 
 class DaqState:
@@ -26,10 +28,13 @@ class DaqState:
         return DaqState.Unknown
 
 
+STATE_notes = {}
 STATE_hpkv = None
 STATE_hpkv_cache = None
+STATE_env = {}
 STATE_prev_daq = DaqState.Unknown
 STATE_current_daq = DaqState.Idle
+STATE_files_to_process = []
 
 
 def setup(hostname, instance, logger=None):
@@ -43,23 +48,33 @@ def setup(hostname, instance, logger=None):
 
 
 def dehydrate():
-    global STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq
-    return (
-        (STATE_hpkv.hostname, STATE_hpkv.instance_id, "redishost"),
-        STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq
-    )
+    global STATE_notes, STATE_hpkv, STATE_hpkv_cache, STATE_env, STATE_prev_daq, STATE_current_daq, STATE_files_to_process
+    return {
+        "notes": STATE_notes,
+        "hostname": STATE_hpkv.hostname,
+        "instance_id": STATE_hpkv.instance_id,
+        "env": STATE_env,
+        "hpkv_cache": STATE_hpkv_cache,
+        "prev_daq": STATE_prev_daq,
+        "current_daq": STATE_current_daq,
+        "files_to_process": STATE_files_to_process,
+    }
 
 
-def rehydrate(dehydration_tuple):
-    global STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq
+def rehydrate(dehydration_dict):
+    global STATE_notes, STATE_hpkv, STATE_hpkv_cache, STATE_env, STATE_prev_daq, STATE_current_daq, STATE_files_to_process
+
+    STATE_notes = dehydration_dict["notes"]
     STATE_hpkv = HashpipeKeyValues(
-        dehydration_tuple[0][0],
-        dehydration_tuple[0][1],
-        redis.Redis(dehydration_tuple[1], decode_responses=True)
+        dehydration_dict["hostname"],
+        dehydration_dict["instance_id"],
+        redis.Redis("redishost", decode_responses=True)
     )
-    STATE_hpkv_cache = dehydration_tuple[1]
-    STATE_prev_daq = dehydration_tuple[2]
-    STATE_current_daq = dehydration_tuple[3]
+    STATE_env = dehydration_dict["env"]
+    STATE_hpkv_cache = dehydration_dict["hpkv_cache"]
+    STATE_prev_daq = dehydration_dict["prev_daq"]
+    STATE_current_daq = dehydration_dict["current_daq"]
+    STATE_files_to_process = dehydration_dict["files_to_process"]
 
 
 def run(env=None, logger=None):
@@ -116,7 +131,41 @@ def setupstage(stage, logger = None):
 
 
 def note(processnote: ProcessNote, **kwargs):
-    pass
+    global STATE_notes, STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_files_to_process
+
+    common.context_take_note(STATE_notes, processnote, kwargs)
+
+    if processnote == ProcessNote.Error:
+        if STATE_env.get("POSTPROC_REMOVE_FAILURES", "true").lower() != "false":
+
+            for file_to_process in STATE_files_to_process:
+                try:
+                    os.remove(file_to_process)
+                    logger.warning(f"Process failed. Removed {file_to_process}.")
+                except:
+                    logger.error(f"Process failed but could not remove {file_to_process} ({traceback.format_exc()}).")
+        else:
+            logger.warning(f"Not removing {STATE_files_to_process}.")
+
+    if "POSTPROC_PROGRESS_REDIS_CHANNEL" not in STATE_env:
+        return
+
+    progress_statement = {
+        "hostname": STATE_hpkv.hostname,
+        "instance_id": STATE_hpkv.instance_id,
+        "observation_id": STATE_hpkv_cache.get("OBSID"),
+        "process_id": str(kwargs["process_id"]),
+    }
+    common.context_build_statement_of_note(progress_statement, processnote, kwargs)
+    kwargs["logger"].debug(progress_statement)
+
+    redis_channel = STATE_env["POSTPROC_PROGRESS_REDIS_CHANNEL"]
+    redis_obj = STATE_hpkv.redis_obj
+
+    redis_obj.publish(
+        redis_channel,
+        json.dumps(progress_statement)
+    )
 
 
 if __name__ == "__main__":
