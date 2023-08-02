@@ -3,6 +3,7 @@ import glob
 import os
 import argparse
 import logging
+import re
 
 from Pypeline import replace_keywords
 
@@ -18,6 +19,34 @@ CONTEXT = {
     "OBSID": None,
 }
 
+def _select_gpu_with_most_memory(logger, gpu_share_index, gpu_shares):
+    nvidia_query_cmd = "nvidia-smi --query-gpu=index,name,pci.bus_id,driver_version,pstate,utilization.gpu,utilization.memory,memory.total,memory.free --format=csv"
+    output = subprocess.run(nvidia_query_cmd.split(" "), capture_output=True)
+    if output.returncode != 0:
+        logger.error(output.stderr.decode())
+    else:
+        nvidia_devs = output.stdout.decode().strip().split("\n")[1:]
+        logger.info("\n".join(nvidia_devs))
+        gpu_per_share = len(nvidia_devs) // gpu_shares
+        gpu_row_start = gpu_share_index*gpu_per_share
+        logger.info(
+            f"Only considering index {gpu_share_index} of {gpu_shares} shares ({gpu_per_share} GPUs per share): rows {gpu_row_start} to {gpu_row_start+gpu_per_share-1}"
+        )
+        nvidia_devs = nvidia_devs[gpu_row_start : gpu_row_start+gpu_per_share]
+
+        details = nvidia_devs[0].split(", ")
+        nvidia_id = details[0]
+        nvidia_memfree = int(details[-1][:-4]) # curtail " MiB"
+        for nvidia_dev in nvidia_devs[1:]:
+            details = nvidia_dev.split(", ")
+            memfree = int(details[-1][:-4]) # curtail " MiB"
+            if memfree > nvidia_memfree:
+                nvidia_id = details[0]
+                nvidia_memfree = memfree
+        
+        logger.info(f"Selected device #{nvidia_id} with {nvidia_memfree} MiB free.")
+    return nvidia_id
+
 def _add_args(parser):
     parser.add_argument(
         "-c",
@@ -28,10 +57,10 @@ def _add_args(parser):
     )
     parser.add_argument(
         "-T",
-        "--search-time",
+        "--beamform-time",
         type=int,
         default=16,
-        help="The amount of upchannelized time to search at a time (also determines how much is beamformed at a time)",
+        help="The amount of upchannelized time to beamform at a time",
     )
     parser.add_argument(
         "-C",
@@ -75,11 +104,6 @@ def _add_args(parser):
         help="The number of parallel workers to execute with",
     )
     parser.add_argument(
-        "--output-beamformed-filterbank",
-        action="store_true",
-        help="Whether or not to write out the beamformed data.",
-    )
-    parser.add_argument(
         "-I",
         "--incoherent-beam",
         action="store_true",
@@ -98,6 +122,13 @@ def _add_args(parser):
         type=int,
         default=0,
         help="Which index of the shared GPUs must be used.",
+    )
+    parser.add_argument(
+        "-gid",
+        "--gpu-id",
+        type=int,
+        default=None,
+        help="GPU device ID selection.",
     )
     parser.add_argument(
         "-gt",
@@ -119,15 +150,52 @@ def _add_args(parser):
         action="store_true",
         help="Log the printout from BLADE in *.blade.stdout.txt.",
     )
+    parser.add_argument(
+        "--negate-phasor-delays",
+        action="store_true",
+        help="BLADE negates the delay values from which the phasors are calculated.",
+    )
+    parser.add_argument(
+        "--mode-b",
+        action="store_true",
+        help="Employ Mode-B instead of Mode-BS.",
+    )
 
 def run(argstr, inputs, env, logger=None):
     global CONTEXT
 
     if logger is None:
         logger = logging.getLogger(NAME)
-    if len(inputs) != 2:
-        logger.error("BeamformSearch requires 2 inputs: RAW, BFR5.")
-        raise ValueError("Incorrect number of inputs.")
+    if len(inputs) < 2:
+        raise ValueError(f"{NAME} requires at least 2 inputs: the raw filepath and the BFR5 filepath.")
+    
+    rawfile_process_limit = 0 # unlimited
+
+    # sort the input filepaths
+    raw_filespaths = []
+    bfr5_filespath = None
+    raw_regex = r'(.*?)\.\d{4}\.raw'
+    for inp in inputs:
+        if re.match(raw_regex, inp):
+            raw_filespaths.append(inp)
+        elif inp.endswith(".bfr5"):
+            if bfr5_filespath is not None:
+                raise ValueError(f"{NAME} requires one BFR5 filepath and at least one RAW filepath. Too many BFR5 filepaths provided.")
+            bfr5_filespath = inp
+        else:
+            raise ValueError(f"{NAME} requires one BFR5 filepath and at least one RAW filepath. Unrecognised input file type: '{inp}'.")
+    
+    raw_filespaths.sort()
+    rawfile_process_limit = len(raw_filespaths)
+    if rawfile_process_limit == 1:
+        if not os.path.exists(raw_filespaths[0]):
+            # stem provided, process all files
+            rawfile_process_limit = 0
+
+    inputs = [
+        raw_filespaths[0],
+        bfr5_filespath
+    ]
 
     parser = argparse.ArgumentParser(
         description="A module to invoke BLADE Mode Beamform-SETISearch.",
@@ -137,7 +205,7 @@ def run(argstr, inputs, env, logger=None):
     parser.add_argument(
         "--output-stempath",
         type=str,
-        default=os.path.splitext(inputs[0])[0],
+        default=inputs[0],
         help="The output directory of the products.",
     )
     argstr = replace_keywords(CONTEXT, argstr)
@@ -147,20 +215,23 @@ def run(argstr, inputs, env, logger=None):
         "blade-cli",
         "-P", # disable progress-bar
         "--input-type", "CI8",
-        "--output-type", "CF32" if not args.output_beamformed_filterbank else "F32",
+        "--output-type", "F32",
         "-t", "ATA",
-        "-m", "BS",
+        "-m", "BS" if not args.mode_b else "B",
+        "--input-guppi-raw-limit", str(rawfile_process_limit)
     ]
     if args.drift_rate_zero_excluded:
         cmd.append('-Z')
     if args.incoherent_beam:
         cmd.append('-I')
+    if args.negate_phasor_delays:
+        cmd.append('--negate-phasor-delays')
     
     cmd.extend([
         "-s", str(args.snr_threshold),
         "-D", str(args.drift_rate_maximum),
         "-c", str(args.channelization_rate),
-        "-T", str(args.search_time),
+        "-T", str(args.beamform_time),
         "-C", str(args.coarse_channel_ingest_rate),
         "-N", str(args.number_of_workers),
         inputs[0],
@@ -173,50 +244,33 @@ def run(argstr, inputs, env, logger=None):
     env_base = os.environ.copy()
     env_base.update(common.env_str_to_dict(env))
 
-    # power limit
-    powerlimit_cmd = [
-        "nvidia-smi",
-        "-pl", str(args.gpu_power_limit),
-    ]
-
+    nvidia_id = args.gpu_id
     if args.gpu_target_most_memory:
-        nvidia_query_cmd = "nvidia-smi --query-gpu=index,name,pci.bus_id,driver_version,pstate,utilization.gpu,utilization.memory,memory.total,memory.free --format=csv"
-        output = subprocess.run(nvidia_query_cmd.split(" "), capture_output=True)
+        nvidia_id = _select_gpu_with_most_memory(
+            logger,
+            args.gpu_share_index,
+            args.gpu_shares
+        )
+
+    if nvidia_id is not None:
+        if "CUDA_VISIBLE_DEVICES" in env_base:
+            logger.warning(f"Overriding CUDA_VISIBLE_DEVICES={env_base['CUDA_VISIBLE_DEVICES']}.")
+        env_base["CUDA_VISIBLE_DEVICES"] = str(nvidia_id)
+        logger.info(f"Set CUDA_VISIBLE_DEVICES={nvidia_id}.")
+
+        # power limit
+        powerlimit_cmd = [
+            "nvidia-smi",
+            "-pl", str(args.gpu_power_limit),
+        ]
+        powerlimit_cmd += [
+            "-i", str(nvidia_id),
+        ]
+
+        logger.debug(f"{powerlimit_cmd}")
+        output = subprocess.run(powerlimit_cmd, capture_output=True)
         if output.returncode != 0:
-            logger.error(output.stderr.decode())
-        else:
-            nvidia_devs = output.stdout.decode().strip().split("\n")[1:]
-            logger.info("\n".join(nvidia_devs))
-            gpu_per_share = len(nvidia_devs) // args.gpu_shares
-            gpu_row_start = args.gpu_share_index*gpu_per_share
-            logger.info(
-                f"Only considering index {args.gpu_share_index} of {args.gpu_shares} shares ({gpu_per_share} GPUs per share): rows {gpu_row_start} to {gpu_row_start+gpu_per_share-1}"
-            )
-            nvidia_devs = nvidia_devs[gpu_row_start : gpu_row_start+gpu_per_share]
-
-            details = nvidia_devs[0].split(", ")
-            nvidia_id = details[0]
-            nvidia_memfree = int(details[-1][:-4]) # curtail " MiB"
-            for nvidia_dev in nvidia_devs[1:]:
-                details = nvidia_dev.split(", ")
-                memfree = int(details[-1][:-4]) # curtail " MiB"
-                if memfree > nvidia_memfree:
-                    nvidia_id = details[0]
-                    nvidia_memfree = memfree
-            
-            logger.info(f"Selected device #{nvidia_id} with {nvidia_memfree} MiB free.")
-            if "CUDA_VISIBLE_DEVICES" in env_base:
-                logger.warning(f"Overriding CUDA_VISIBLE_DEVICES={env_base['CUDA_VISIBLE_DEVICES']}.")
-            env_base["CUDA_VISIBLE_DEVICES"] = nvidia_id
-
-            powerlimit_cmd += [
-                "-i", str(nvidia_id),
-            ]
-
-    logger.debug(f"{powerlimit_cmd}")
-    output = subprocess.run(powerlimit_cmd, capture_output=True)
-    if output.returncode != 0:
-        logger.error(output.stderr.decode())
+            logger.error(output.stdout.decode())
 
     output = subprocess.run(cmd, env=env_base, capture_output=True)
     stdoutput = output.stdout.decode().strip()
