@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import logging, os, argparse, json, glob
 
+import bfr5genie
 from bfr5genie import entrypoints
 
 ENV_KEY = None
@@ -13,9 +14,21 @@ def run(argstr, inputs, env, logger=None):
     if logger is None:
         logger = logging.getLogger(NAME)
     if len(inputs) != 1:
-        logger.error("bfr5_generate requires one input, the RAW filepath.")
-        return None
+        raw_filepaths = list(
+            filter(
+                lambda s: s.endswith(".raw"),
+                inputs
+            )
+        )
+        if len(raw_filepaths) != len(inputs):
+            logger.warning(f"{NAME} only takes RAW filepaths, filtering.")
+        inputs = raw_filepaths
+
     
+    bfr5genie.logger.handlers.clear()
+    for handler in logger.handlers:
+        bfr5genie.logger.addHandler(handler)
+
     arg_strs = argstr.split('"')
 
     arg_values = []
