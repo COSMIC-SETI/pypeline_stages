@@ -50,11 +50,6 @@ def run(argstr, inputs, env, logger=None):
         required=True,
         help="The destination directory.",
     )
-    parser.add_argument(
-        "--mv-instead-of-rsync",
-        action="store_true",
-        help="Instead of using rsync, just use 'mv'.",
-    )
     if argstr is None:
         argstr = ""
     argstr = replace_keywords(CONTEXT, argstr)
@@ -91,18 +86,29 @@ def run(argstr, inputs, env, logger=None):
         for beam_i, beam_source in enumerate(beam_src_names):
             scan_id = bfr5["obsinfo"]["obsid"][()].decode()
             beam_time_start = datetime.fromtimestamp(bfr5["delayinfo"]["time_array"][0])
-            beam_time_end = datetime.fromtimestamp(bfr5["delayinfo"]["time_array"][-1])
+            # floor to the second as teh beam time can extend past the related scan
+            beam_time_end = datetime.fromtimestamp(bfr5["delayinfo"]["time_array"][-1]).replace(microsecond=0)
 
-            db_obs = session.scalars(
-                sqlalchemy.select(entities.CosmicDB_Observation)
-                .where(
-                    entities.CosmicDB_Observation.scan_id == scan_id,
-                    entities.CosmicDB_Observation.start <= beam_time_start,
-                    entities.CosmicDB_Observation.end >= beam_time_start,
-                    entities.CosmicDB_Observation.start <= beam_time_end,
-                    entities.CosmicDB_Observation.end >= beam_time_end,
-                )
-            ).one()
+            where_criteria = [
+                entities.CosmicDB_Observation.scan_id == scan_id,
+                entities.CosmicDB_Observation.start <= beam_time_start,
+                entities.CosmicDB_Observation.end >= beam_time_start,
+                entities.CosmicDB_Observation.start <= beam_time_end,
+                entities.CosmicDB_Observation.end >= beam_time_end,
+            ]
+            try:
+                db_obs = session.scalars(
+                    sqlalchemy.select(entities.CosmicDB_Observation)
+                    .where(*where_criteria)
+                ).one()
+            except:
+                logger.warning(f"Failed to get Observation with the criteria: scan_id=={scan_id}, start<={beam_time_start}<=end, start<={beam_time_end}<=end.")   
+                db_obs = session.scalars(
+                    sqlalchemy.select(entities.CosmicDB_Observation)
+                    .where(where_criteria[0])
+                    .order_by(entities.CosmicDB_Observation.end.desc())
+                ).first()
+                logger.warning(f"Fallback is the most recent Observation with that scan_id: {db_obs}")
 
             db_beam_fields = {
                 "observation_id": db_obs.id,
@@ -113,12 +119,14 @@ def run(argstr, inputs, env, logger=None):
                 "end": beam_time_end,
             }
 
-            db_beam = cosmicdb_engine.select_entity(
-                session,
-                entities.CosmicDB_ObservationBeam,
-                **db_beam_fields
-            )
-            if db_beam is None:
+            db_beam = session.execute(
+                sqlalchemy.select(entities.CosmicDB_ObservationBeam)
+                .where(*[
+                    getattr(entities.CosmicDB_ObservationBeam, colname) == colval
+                    for colname, colval in db_beam_fields.items()
+                ])
+            ).scalars().all()
+            if len(db_beam) == 0:
                 db_beam = entities.CosmicDB_ObservationBeam(
                     **db_beam_fields
                 )
@@ -127,6 +135,7 @@ def run(argstr, inputs, env, logger=None):
                 session.refresh(db_beam)
                 logger.info(f"Committed {db_beam}")
             else:
+                db_beam = db_beam[0]
                 logger.info(f"Found {db_beam}")
             
             beam_index_to_db_id_map[beam_i] = db_beam.id
@@ -228,7 +237,7 @@ def run(argstr, inputs, env, logger=None):
     for inputpath in inputs:
         destinationpath = input_to_output_filepath_map[inputpath]
         cmd = [
-            "mv" if args.mv_instead_of_rsync else 'rsync',
+            "mv",
             inputpath,
             destinationpath
         ]
@@ -236,16 +245,10 @@ def run(argstr, inputs, env, logger=None):
         output = subprocess.run(cmd, capture_output=True)
         if output.returncode != 0:
             raise RuntimeError(output.stderr.decode())
-        
-        if args.mv_instead_of_rsync:
-            shutil.chown(destinationpath, user="cosmic", group="cosmic")
-        else:
-            try:
-                os.remove(inputpath)
-            except:
-                logger.error(f"Failed to remove {inputpath} ({traceback.format_exc()}).")
-            
+
+        shutil.chown(destinationpath, user="cosmic", group="cosmic")
         all_moved.append(destinationpath)
+            
     return all_moved
 
 if __name__ == "__main__":
