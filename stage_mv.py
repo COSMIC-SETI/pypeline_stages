@@ -48,7 +48,7 @@ def run(argstr, inputs, env, logger=None):
 
     if not os.path.exists(args.destination_dirpath):
         logger.info(f"Creating destination directory: {args.destination_dirpath}")
-        makedirs(args.destination_dirpath, user="cosmic", group="cosmic", mode=0o777)
+        makedirs(args.destination_dirpath, user="cosmic", group="cosmic", mode=0o777, exist_ok=True)
 
     all_copied = []
     for inputpath in inputs:
