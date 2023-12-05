@@ -2,6 +2,7 @@ import logging
 import subprocess
 import os
 import argparse
+import time
 
 import common
 
@@ -43,6 +44,7 @@ def run(argstr, inputs, env, logger=None):
     env_base = os.environ.copy()
     env_base.update(common.env_str_to_dict(env))
 
+    t_start = time.time()
     logger.info(cmd)
     output = subprocess.run(
         cmd,
@@ -54,6 +56,10 @@ def run(argstr, inputs, env, logger=None):
         raise RuntimeError(output.stderr.decode())
     output = output.stdout.decode().strip()
     logger.info(output)
+
+    t_elapsed = time.time() - t_start
+    if t_elapsed > 8:
+        raise RuntimeError(f"Took longer than 8 seconds: {t_elapsed} s")
     
     return []
 
