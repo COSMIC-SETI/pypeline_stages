@@ -1,0 +1,17 @@
+[Unit]
+Description=Pypeline monitoring instance.
+After=hpdaq.service
+After=network.target
+Requires=network.target
+
+[Service]
+EnvironmentFile=/home/cosmic/conf/pypeline_monitor_service.conf
+Restart=on-failure
+Type=simple
+ExecCondition=sh -c '[ `hostname` = "cosmic-head" ]'
+ExecStart=/home/cosmic/anaconda3/envs/cosmic_vla/bin/python3 /home/cosmic/anaconda3/envs/cosmic_vla/bin/pypeline 0 pypeline_status_watcher --workers $PYPELINE_WORKERS --queue-limit $PYPELINE_QUEUE_LIMIT --log-directory $PYPELINE_LOG_DIRECTORY --log-backup-days $PYPELINE_LOG_BACKUPS -vvv -kv "#STAGES=pypeline_status_reporter" "PypelineStatusReporterINP=*pypeline_status_watcher" "PypelineStatusReporterARG=--slack-alerts-channel-id C058PF2PJHZ"
+StandardOutput=append:/var/log/pypeline_monitor.log
+StandardError=append:/var/log/pypeline_monitor.log
+
+[Install]
+WantedBy=multi-user.target
