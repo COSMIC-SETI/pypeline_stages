@@ -70,7 +70,7 @@ def dehydrate():
         "hostname": STATE_hpkv.hostname,
         "instance_id": STATE_hpkv.instance_id,
         "env": STATE_env, 
-        "hpkv_cache": STATE_hpkv_cache, 
+        "hpkv_cache": STATE_hpkv_cache,
         "prev_daq": STATE_prev_daq, 
         "current_daq": STATE_current_daq,
         "processed_parts": STATE_processed_parts, 
@@ -179,7 +179,7 @@ def run(env=None, logger=None):
         # not recording and procesed everything
         STATE_parts_to_process = []
 
-    STATE_hpkv_cache = STATE_hpkv.get_cache()
+    STATE_hpkv_cache = STATE_hpkv.get()
 
     if len(STATE_parts_to_process) > 0:
         STATE_processed_parts.extend(STATE_parts_to_process)

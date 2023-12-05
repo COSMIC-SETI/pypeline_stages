@@ -101,7 +101,7 @@ def run(env=None, logger=None):
     obs_stempath = f"{os.path.join(*STATE_hpkv.observation_stempath)}*"
     output_filepaths = glob.glob(obs_stempath)
 
-    STATE_hpkv_cache = STATE_hpkv.get_cache()
+    STATE_hpkv_cache = STATE_hpkv.get()
 
     return output_filepaths
 
