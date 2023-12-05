@@ -4,6 +4,25 @@ from typing import Dict
 
 from Pypeline import ProcessNote
 
+def split_argument_string(argstr):
+    """
+    Splits a string, respecting quotation encapsulated sequences.
+    """
+    arg_strs = argstr.split('"')
+
+    arg_values = []
+    for argstr_index, arg_str in enumerate(arg_strs):
+        if argstr_index%2 == 1:
+            # argstr was encapsulated in quotations
+            arg_values.append(arg_str)
+        elif len(arg_str.strip()) > 0:
+            argstr_values = arg_str.strip().split(" ")
+            if argstr_index == len(arg_strs)-1 and len(arg_strs)%2 == 0:
+                argstr_values[0] = f'"{argstr_values[0]}'
+
+            arg_values += argstr_values
+    return arg_values
+
 
 def env_str_to_dict(env_value):
     env_dict = {}
@@ -105,7 +124,8 @@ def context_take_note(state_dict, processnote: ProcessNote, kwargs: Dict):
         state_dict["stages"][stage_name]["error"] = time_now
         stage_duration = time_now - state_dict["stages"][stage_name]["start"]
         
-        logger.info(f"Stage '{stage_name}' errored after {stage_duration}")
+        logger.info(f"Stage '{stage_name}' errored after {stage_duration}.\n{traceback.format_exc()}")
+        logger.info(_get_notes_summary(state_dict))
 
     elif processnote == ProcessNote.Finish:
         state_dict["finish"] = time_now
