@@ -13,5 +13,5 @@ else
 	systemctl disable pypeline_monitor
 	systemctl daemon-reload
 	systemctl enable pypeline_monitor
-	systemctl enable pypeline@
+	# systemctl enable pypeline@
 fi

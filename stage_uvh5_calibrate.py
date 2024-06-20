@@ -23,7 +23,9 @@ def run(argstr, inputs, env, logger=None):
     if logger is None:
         logger = logging.getLogger(NAME)
     if len(inputs) != 1:
-        logger.error(f"calibrate_uvh5 requires one input, the uvh5 filepath. Not: {inputs}")
+        message = f"calibrate_uvh5 requires one input, the uvh5 filepath. Not: {inputs}"
+        logger.error(message)
+        raise ValueError(message)
         return None
     
     # parser = argparse.ArgumentParser(
@@ -39,7 +41,7 @@ def run(argstr, inputs, env, logger=None):
     # args = parser.parse_args(argstr.split(" "))
 
     argstr = replace_keywords(CONTEXT, argstr)
-    cmd = f"/home/cosmic/anaconda3/envs/cosmic_vla/bin/python3 /home/cosmic/src/COSMIC-VLA-CalibrationEngine/calibrate_uvh5.py -d {inputs[0]} {argstr}"
+    cmd = f"/home/cosmic/anaconda3/envs/cosmic_vla/bin/python3 /home/cosmic/src/COSMIC-VLA-CalibrationEngine/calibrate_uvh5.py {inputs[0]} {argstr}"
 
     env_base = os.environ.copy()
     env_base.update(common.env_str_to_dict(env))
@@ -59,7 +61,9 @@ def run(argstr, inputs, env, logger=None):
 
     t_elapsed = time.time() - t_start
     if t_elapsed > 8:
-        raise RuntimeError(f"Took longer than 8 seconds: {t_elapsed} s")
+        message = f"Took longer than 8 seconds: {t_elapsed} s"
+        logger.warning(message)
+        # raise RuntimeError(message)
     
     return []
 

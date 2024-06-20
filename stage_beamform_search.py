@@ -160,6 +160,13 @@ def _add_args(parser):
         action="store_true",
         help="Employ Mode-B instead of Mode-BS.",
     )
+    parser.add_argument(
+        "-x",
+        "--search-exclusion-subband",
+        type=str,
+        default=None,
+        help="Exclusion subband CSV file.",
+    )
 
 def run(argstr, inputs, env, logger=None):
     global CONTEXT
@@ -224,6 +231,8 @@ def run(argstr, inputs, env, logger=None):
         cmd.append('-Z')
     if args.incoherent_beam:
         cmd.append('-I')
+    if args.search_exclusion_subband:
+        cmd += ['-x', args.search_exclusion_subband]
     if args.negate_phasor_delays:
         cmd.append('--negate-phasor-delays')
     
@@ -243,6 +252,7 @@ def run(argstr, inputs, env, logger=None):
 
     env_base = os.environ.copy()
     env_base.update(common.env_str_to_dict(env))
+    # logger.info(f"env: {env_base}")
 
     nvidia_id = args.gpu_id
     if args.gpu_target_most_memory:
@@ -258,20 +268,22 @@ def run(argstr, inputs, env, logger=None):
         env_base["CUDA_VISIBLE_DEVICES"] = str(nvidia_id)
         logger.info(f"Set CUDA_VISIBLE_DEVICES={nvidia_id}.")
 
-        # power limit
-        powerlimit_cmd = [
-            "nvidia-smi",
-            "-pl", str(args.gpu_power_limit),
-        ]
-        powerlimit_cmd += [
-            "-i", str(nvidia_id),
-        ]
+        # assume power limit set elsewhere
+        # # power limit
+        # powerlimit_cmd = [
+        #     "nvidia-smi",
+        #     "-pl", str(args.gpu_power_limit),
+        # ]
+        # powerlimit_cmd += [
+        #     "-i", str(nvidia_id),
+        # ]
 
-        logger.debug(f"{powerlimit_cmd}")
-        output = subprocess.run(powerlimit_cmd, capture_output=True)
-        if output.returncode != 0:
-            logger.error(output.stdout.decode())
+        # logger.debug(f"{powerlimit_cmd}")
+        # output = subprocess.run(powerlimit_cmd, capture_output=True)
+        # if output.returncode != 0:
+        #     logger.error(output.stdout.decode())
 
+    logger.debug(f"{cmd}")
     output = subprocess.run(cmd, env=env_base, capture_output=True)
     stdoutput = output.stdout.decode().strip()
     stdoutput_last_line = stdoutput.split('\n')[-1]

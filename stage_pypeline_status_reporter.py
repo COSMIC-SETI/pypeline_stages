@@ -1,11 +1,11 @@
 from typing import List, Dict
 import time
+from datetime import datetime
 import logging
 import argparse
 import os
 from enum import Enum
 
-from hashpipe_keyvalues.standard import HashpipeKeyValues
 from cosmic.observations.slackbot import SlackBot
 
 from Pypeline.redis_interface import RedisClientInterface
@@ -33,6 +33,14 @@ def service_identifier_from_hashpipe_target_string(hpt_str):
         hostname=hpt_str[0:last_fullstop_index],
         enumeration=int(hpt_str[last_fullstop_index+1:])
     )
+
+def service_identifier_hostname_enumeration(si):
+    hostname_str = si.hostname
+    try:
+        last_hyphen_index = hostname_str.rindex('-')
+        return int(hostname_str[last_hyphen_index+1:])*10 + si.enumeration
+    except:
+        return si.enumeration
 
 def post_alert(slackbot, message_blocks: list, channel_id: str = None, message_ts: str = None):
     if message_ts is None:
@@ -102,12 +110,11 @@ def run(argstr, inputs, env, logger = None):
         + args.obs_end_margin_s
     )
 
-    hashpipe_instances = observation_message["hashpipe_instances"]
-    hashpipe_instances.sort()
     service_identifiers: List[ServiceIdentifier] = [
         service_identifier_from_hashpipe_target_string(hpt_str)
-        for hpt_str in hashpipe_instances
+        for hpt_str in observation_message["hashpipe_instances"]
     ]
+    service_identifiers.sort(key=service_identifier_hostname_enumeration)
 
     pypeline_redis_clients = {
         si: RedisClientInterface(
@@ -179,7 +186,7 @@ def run(argstr, inputs, env, logger = None):
                         message_update = True
                         alert_update = True
                         pypline_alertmessages[si].append(
-                            "Dropped"
+                            f"{datetime.now()} Dropped"
                         )
                     else:
                         message_update = True
@@ -219,7 +226,7 @@ def run(argstr, inputs, env, logger = None):
                         message_update = True
                         alert_update = True
                         pypline_alertmessages[si].append(
-                            f"Errored: {process_note_message.error_message}"
+                            f"{datetime.now()} Errored: {process_note_message.error_message}"
                         )
                     elif process_note_message.job_id in pypeline_queued_jobids[si]:
                         logger.warn(f"... unexpected note for {process_note_message.job_id}: {process_note_message.process_note}")
@@ -235,14 +242,15 @@ def run(argstr, inputs, env, logger = None):
                         message_update = True
                         alert_update = True
                         pypline_alertmessages[si].append(
-                            f"StageErrored: {process_note_message.error_message}"
+                            f"{datetime.now()} StageErrored: {process_note_message.error_message}"
                         )
 
         # post update
         if (not continue_monitoring) and message_update:
             sleep_time = slack_update_allowed_timestamp - time.time()
-            if sleep_time > 0:
-                time.sleep(sleep_time)
+            if sleep_time < 0:
+                sleep_time = 0
+            time.sleep(sleep_time + args.slack_update_limit_s)
         
         if message_update and (time.time() >= slack_update_allowed_timestamp):
             message_sections=[]
@@ -255,6 +263,7 @@ def run(argstr, inputs, env, logger = None):
                 )
 
             response = slackbot.update_message(
+                f"{datetime.now()}",
                 "Post-Process is " + ("ongoing..." if continue_monitoring else "complete."),
                 "\n".join(message_sections),
                 ts=slack_message_ts
@@ -264,18 +273,21 @@ def run(argstr, inputs, env, logger = None):
 
         if (not continue_monitoring) and alert_update:
             sleep_time = slack_update_allowed_timestamp - time.time()
-            if sleep_time > 0:
-                time.sleep(sleep_time)
+            if sleep_time < 0:
+                sleep_time = 0
+            time.sleep(sleep_time + args.slack_update_limit_s)
 
         if alert_update and (time.time() >= slack_update_allowed_timestamp):
             slack_alert_ts = post_alert(
                 slackbot,
                 [
+                    f"{datetime.now()}",
                     "Post-Process is " + ("ongoing..." if continue_monitoring else "complete."),
                     message_referal_str,
                     "\n".join([
                         f"{si}\n```"+'\n'.join(ms)+"```\n"
                         for si, ms in pypline_alertmessages.items()
+                        if len(ms) > 0
                     ])
                 ],
                 channel_id=args.slack_alerts_channel_id,

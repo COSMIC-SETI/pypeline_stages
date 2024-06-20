@@ -70,6 +70,16 @@ def run(argstr, inputs, env, logger=None):
         
     bfr5 = h5py.File(bfr5_filepaths[0], 'r')
 
+    # supplement CONTEXT values from env-vars in case script is reused
+    env_dict = common.env_str_to_dict(env)
+    context_keys = list(CONTEXT.keys())
+    for key in context_keys:
+        CONTEXT[key] = CONTEXT.get(key, env_dict.get(key, None))
+
+    if CONTEXT["SCHAN"] is None:
+        logger.warning("No value provided for SCHAN, substituting -1.")
+        CONTEXT["SCHAN"] = -1
+
     beam_index_to_db_id_map = {}
     beam_index_to_obs_id_map = {}
 
@@ -196,7 +206,7 @@ def run(argstr, inputs, env, logger=None):
                         beam_id = beam_index_to_db_id_map[hit.signal.beam],
                         observation_id = beam_index_to_obs_id_map[hit.signal.beam],
                         tuning = CONTEXT["TUNING"],
-                        subband_offset = CONTEXT["SCHAN"],
+                        subband_offset = int(CONTEXT["SCHAN"]),
 
                         file_uri = input_to_output_filepath_map[hits_filepath],
                         file_local_enumeration = hit_enum,
@@ -231,7 +241,7 @@ def run(argstr, inputs, env, logger=None):
     # Move the files
     if not os.path.exists(args.destination_dirpath):
         logger.info(f"Creating destination directory: {args.destination_dirpath}")
-        common.makedirs(args.destination_dirpath, user="cosmic", group="cosmic", mode=0o777)
+        common.makedirs(args.destination_dirpath, user="cosmic", group="cosmic", mode=0o777, exist_ok=True)
 
     all_moved = []
     for inputpath in inputs:

@@ -108,7 +108,8 @@ for bfr5_filepath in bfr5filepaths:
 
     for chanrate in args.channelization_rates:
         for bfrate in args.beamformer_rates:
-            redis_kvcache["BeamformSearchARG"] = f"-c {chanrate} -C 1 -T {bfrate} -N 1 --gpu-id {args.gpu_id} --snr-threshold 8.0 --drift-rate-zero-excluded --drift-rate-maximum 50.0"
+            # redis_kvcache["BeamformSearchARG"] = f"-c {chanrate} -C 1 -T {bfrate} -N 1 --gpu-id {args.gpu_id} --snr-threshold 8.0 --drift-rate-zero-excluded --drift-rate-maximum 50.0"
+            redis_kvcache["BeamformSearchARG"] = f"-c {chanrate} -C 1 -T {bfrate} -N 1 --gpu-id {args.gpu_id} --snr-threshold 8.0 --drift-rate-maximum 50.0"
 
             assessment = {
                 "chanrate": chanrate,

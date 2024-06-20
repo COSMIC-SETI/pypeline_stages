@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import logging, os, argparse, json, glob
+import logging, os, json
 import time
 import tomli_w
 
@@ -7,6 +7,7 @@ import bfr5genie
 from bfr5genie import entrypoints
 from guppi import GuppiRawHandler
 import redis
+import re
 
 import common
 
@@ -192,6 +193,8 @@ if __name__ == "__main__":
     logger = logging.getLogger(NAME)
     logger.addHandler(logging.StreamHandler())
     logger.setLevel(logging.DEBUG)
+    logger.info("__main__")
+    exit(1)
 
     # args = [
     #     "--telescope-info-toml-filepath",

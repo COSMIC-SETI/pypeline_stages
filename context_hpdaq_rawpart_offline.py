@@ -44,7 +44,7 @@ def dehydrate():
 
 
 def rehydrate(dehydration_dict):
-    global STATE_notes, STATE_env, STATE_hostname_instance_tuple, STATE_current_guppi0_header
+    global STATE_notes, STATE_env, STATE_hostname_instance_tuple, STATE_current_batch, STATE_current_guppi0_header
 
     STATE_notes = dehydration_dict["notes"]
     STATE_env = dehydration_dict["env"]
@@ -125,12 +125,15 @@ def run(env=None, logger=None):
         STATE_batch_iter = iter(batches)
 
     try:
-        STATE_current_batch = next(STATE_batch_iter)
-        STATE_current_guppi0_header = {}
-        if len(STATE_current_batch) > 0:
-            for hdr, data in GuppiRawHandler(STATE_current_batch[0]).blocks():
-                STATE_current_guppi0_header.update(hdr)
+        while True:
+            STATE_current_batch = next(STATE_batch_iter)
+            STATE_current_guppi0_header = {}
+            try:
+                header_iter = GuppiRawHandler(STATE_current_batch[0]).headers()
+                STATE_current_guppi0_header.update(next(header_iter))
                 break
+            except:
+                pass
         
         # provide common property request as a key-value in case the property isn't
         # set on the class instance...
@@ -189,9 +192,16 @@ def note(processnote: ProcessNote, **kwargs):
                 else:
                     shutil.chown(destinationpath, user="cosmic", group="cosmic")
                     logger.warning(f"Process failed. Moved {part_to_process}.")
+        elif STATE_env.get("POSTPROC_REMOVE_FAILURES", "false").lower() != "false":
+            for part_to_process in STATE_current_batch:
+                try:
+                    os.remove(part_to_process)
+                    logger.warning(f"Process failed. Removed {part_to_process}.")
+                except:
+                    logger.error(f"Process failed but could not remove {part_to_process} ({traceback.format_exc()}).")
                     
         else:
-            logger.warning(f"Not moving {STATE_current_batch}.")
+            logger.warning(f"Not handling failed batch {STATE_current_batch}.")
 
 
 if __name__ == "__main__":

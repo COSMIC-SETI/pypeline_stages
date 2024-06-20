@@ -1,15 +1,11 @@
 import os
 import glob
-import json
 import logging
 import traceback
 import time
 
-import redis
-
 from Pypeline import ProcessNote
-
-from hashpipe_keyvalues.standard import HashpipeKeyValues
+from hashpipe_status_keyvalues import HashpipeStatusSharedMemoryIPC
 
 import common
 
@@ -43,12 +39,12 @@ class DaqState:
 
 
 STATE_notes = {}
-STATE_hpkv = None
-STATE_hpkv_cache = None
+STATE_hpinstance = None
+STATE_hpstatus_buffer = None
 STATE_recording_exhausted = True
 STATE_env = {}
 STATE_prev_daq = DaqState.Unknown
-STATE_current_daq = DaqState.Idle
+STATE_current_daq = DaqState.Unknown
 STATE_processed_parts = []
 STATE_parts_to_process = []
 
@@ -56,21 +52,18 @@ STATE_parts_to_process = []
 def setup(hostname, instance, logger=None):
     if logger is None:
         logger = logging.getLogger(NAME)
-    global STATE_hpkv
-
-    STATE_hpkv = HashpipeKeyValues(
-        hostname, instance, redis.Redis("redishost", decode_responses=True)
-    )
+    global STATE_hpinstance
+    STATE_hpinstance = instance
 
 
 def dehydrate():
-    global STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_processed_parts, STATE_parts_to_process
+    global STATE_env, STATE_hpinstance, STATE_hpstatus_buffer, STATE_prev_daq, STATE_current_daq, STATE_processed_parts, STATE_parts_to_process
+
     return {
         "notes": STATE_notes,
-        "hostname": STATE_hpkv.hostname,
-        "instance_id": STATE_hpkv.instance_id,
+        "instance_id": STATE_hpinstance,
         "env": STATE_env, 
-        "hpkv_cache": STATE_hpkv_cache,
+        "hpstatus_buffer": STATE_hpstatus_buffer,
         "prev_daq": STATE_prev_daq, 
         "current_daq": STATE_current_daq,
         "processed_parts": STATE_processed_parts, 
@@ -79,16 +72,12 @@ def dehydrate():
 
 
 def rehydrate(dehydration_dict):
-    global STATE_notes, STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_processed_parts, STATE_parts_to_process
+    global STATE_notes, STATE_env, STATE_hpinstance, STATE_hpstatus_buffer, STATE_prev_daq, STATE_current_daq, STATE_processed_parts, STATE_parts_to_process
 
     STATE_notes = dehydration_dict["notes"]
-    STATE_hpkv = HashpipeKeyValues(
-        dehydration_dict["hostname"],
-        dehydration_dict["instance_id"],
-        redis.Redis("redishost", decode_responses=True)
-    )
+    STATE_hpinstance = dehydration_dict["instance_id"]
     STATE_env = dehydration_dict["env"]
-    STATE_hpkv_cache = dehydration_dict["hpkv_cache"]
+    STATE_hpstatus_buffer = dehydration_dict["hpstatus_buffer"]
     STATE_prev_daq = dehydration_dict["prev_daq"]
     STATE_current_daq = dehydration_dict["current_daq"]
     STATE_processed_parts = dehydration_dict["processed_parts"]
@@ -99,29 +88,45 @@ def run(env=None, logger=None):
     if logger is None:
         logger = logging.getLogger(NAME)
     
-    global STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_prev_daq, STATE_current_daq, STATE_processed_parts, STATE_parts_to_process, STATE_recording_exhausted
+    global STATE_env, STATE_hpinstance, STATE_hpstatus_buffer, STATE_prev_daq, STATE_current_daq, STATE_processed_parts, STATE_parts_to_process, STATE_recording_exhausted
     # TODO probably ought to only do this when env is a different value
     STATE_env.clear()
     STATE_env.update(common.env_str_to_dict(env))
 
-    daqstate = STATE_hpkv.get("DAQSTATE")
-    if daqstate is not None:
-        STATE_prev_daq = STATE_current_daq
-        STATE_current_daq = DaqState.decode_daqstate(daqstate)
+    STATE_prev_daq = STATE_current_daq
+    hpstatus_ipc = HashpipeStatusSharedMemoryIPC(STATE_hpinstance, lock_timeout_s=5)
+    STATE_hpstatus_buffer = hpstatus_ipc.parse_buffer()
+    daqstate = None
+    for i in range(10):
+        try:
+            daqstate = STATE_hpstatus_buffer["DAQSTATE"]
+            break
+        except KeyError:
+            STATE_hpstatus_buffer = hpstatus_ipc.parse_buffer()
+            time.sleep(0.5)
+    if daqstate is None:
+        logger.warning(f"Could not access DAQSTATE in buffer: {STATE_hpstatus_buffer}")
+        return None
+    
+    if (current_daq := DaqState.decode_daqstate(daqstate)) != DaqState.Unknown:
+        STATE_current_daq = current_daq
         if STATE_current_daq != STATE_prev_daq:
-            logger.info(f"STATE_current_daq: {DaqState.encode_daqstate(STATE_current_daq)}, STATE_prev_daq: {DaqState.encode_daqstate(STATE_prev_daq)}")
-    elif STATE_prev_daq != DaqState.Unknown:
-        logger.warning(f"DaqState is None, previously was {STATE_current_daq}")
+            logger.info(f"STATE_current_daq: {STATE_current_daq}, STATE_prev_daq: {STATE_prev_daq}")
+    else:
+        # logger.warning(f"Unrecognised DAQSTATE value: {daqstate}, previously was {STATE_prev_daq}")
         return None
 
-    # TODO make an exhaustive enum of the states...
+    # TODO make an exhaustive enum of the transitions...
     record_started = STATE_prev_daq != DaqState.Record and STATE_current_daq == DaqState.Record
     record_ongoing = STATE_current_daq == DaqState.Record
     record_finished = STATE_prev_daq == DaqState.Record and STATE_current_daq == DaqState.Idle
     # logger.debug(f"started: {record_started} , ongoing: {record_ongoing} , finished: {record_finished}")
 
     STATE_parts_to_process = []
-    stem_path = os.path.join(*map(str, STATE_hpkv.observation_stempath))
+    if not any([record_started, record_ongoing, record_finished]):
+        return None
+
+    stem_path = STATE_hpstatus_buffer.observation_stempath
     all_parts = list(
         filter(
             os.path.isfile,
@@ -162,9 +167,17 @@ def run(env=None, logger=None):
     elif record_finished:
         logger.info(f"Recording has finished.")
         # remaining unprocessed parts are taken to be complete
-        if len(unprocessed_parts) > 0:
-            STATE_parts_to_process = unprocessed_parts[0:]
-        if STATE_hpkv.get("PKTSTART") == STATE_hpkv.get("PKTSTOP"):
+        if STATE_env.get("DELETE_FINAL_BATCH", "false").lower() == "true":
+            logger.info(f"Deleting final batch: {unprocessed_parts}")
+            for part in unprocessed_parts:
+                try:
+                    os.remove(part)
+                except:
+                    logger.error(f"Could not delete '{part}'")
+        else:
+            if len(unprocessed_parts) > 0:
+                STATE_parts_to_process = unprocessed_parts[0:]
+        if STATE_hpstatus_buffer.get("PKTSTART") == STATE_hpstatus_buffer.get("PKTSTOP"):
             logger.info(f"Recording was cancelled. Not processing remaining parts: {STATE_parts_to_process}")
             STATE_processed_parts += unprocessed_parts
             STATE_parts_to_process = []
@@ -179,8 +192,6 @@ def run(env=None, logger=None):
         # not recording and procesed everything
         STATE_parts_to_process = []
 
-    STATE_hpkv_cache = STATE_hpkv.get()
-
     if len(STATE_parts_to_process) > 0:
         STATE_processed_parts.extend(STATE_parts_to_process)
 
@@ -192,32 +203,32 @@ def run(env=None, logger=None):
 def setupstage(stage, logger = None):
     if logger is None:
         logger = logging.getLogger(NAME)
-    global STATE_hpkv_cache
-    context_obj = None
-    if hasattr(stage, "CONTEXT"):
-        context_obj = stage.CONTEXT
-    else:
-        logger.warning(f"Stage has no CONTEXT to populate.")
+    global STATE_hpstatus_buffer
+
+    if not hasattr(stage, "CONTEXT"):
+        logger.debug(f"Stage has no CONTEXT to populate.")
         return
+    context_obj = stage.CONTEXT
 
     for key in context_obj.keys():
         try:
             context_obj[key] = (
-                getattr(STATE_hpkv_cache, key)
-                if hasattr(STATE_hpkv_cache, key)
-                else STATE_hpkv_cache.get(key)
+                getattr(STATE_hpstatus_buffer, key)
+                if hasattr(STATE_hpstatus_buffer, key)
+                else STATE_hpstatus_buffer[key]
             )
         except:
-            logger.error(f"Could not populate key: {key}.")
+            logger.warning(f"Could not populate key: {key}.")
 
 
 def note(processnote: ProcessNote, **kwargs):
-    global STATE_notes, STATE_env, STATE_hpkv, STATE_hpkv_cache, STATE_parts_to_process
+    global STATE_notes, STATE_env, STATE_parts_to_process
 
     common.context_take_note(STATE_notes, processnote, kwargs)
     logger = kwargs["logger"]
 
-    if processnote == ProcessNote.Error:
+    logger.debug(f"{processnote}")
+    if processnote in [ProcessNote.Error, ProcessNote.StageError]:
         if STATE_env.get("POSTPROC_REMOVE_FAILURES", "true").lower() != "false":
             for part_to_process in STATE_parts_to_process:
                 try:
@@ -228,26 +239,9 @@ def note(processnote: ProcessNote, **kwargs):
         else:
             logger.warning(f"Not removing {STATE_parts_to_process}.")
 
-    if "POSTPROC_PROGRESS_REDIS_CHANNEL" not in STATE_env:
-        return
+    if processnote in [ProcessNote.Finish, ProcessNote.Error, ProcessNote.StageError]:
+        logger.info(common._get_notes_summary(STATE_notes))
 
-    progress_statement = {
-        "hostname": STATE_hpkv.hostname,
-        "instance_id": STATE_hpkv.instance_id,
-        "observation_id": STATE_hpkv_cache.get("OBSID"),
-        "process_id": str(kwargs["process_id"]),
-        "context_outputs": [STATE_parts_to_process],
-    }
-    common.context_build_statement_of_note(progress_statement, processnote, kwargs)
-    logger.debug(f"Progress statement: {progress_statement}")
-
-    redis_channel = STATE_env["POSTPROC_PROGRESS_REDIS_CHANNEL"]
-    redis_obj = STATE_hpkv.redis_obj
-
-    redis_obj.publish(
-        redis_channel,
-        json.dumps(progress_statement)
-    )
 
 if __name__ == "__main__":
     import socket
