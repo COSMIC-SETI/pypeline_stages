@@ -91,6 +91,7 @@ def retroactive_setup_for_target_gen(arg_values, inputs, logger=None):
     # creates telinfo file, requests targets and manipulates arg_values
     parser = entrypoints._base_arguments_parser()
     entrypoints._add_arguments_targetselector(parser)
+    entrypoints._add_arguments_beams(parser)
     arg_namespace = parser.parse_args(arg_values+inputs)
 
     rawfile_dir, rawfile_name = os.path.split(inputs[0])
